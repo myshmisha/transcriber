@@ -4,15 +4,20 @@ import threading
 import queue
 import time
 from typing import Optional
-from flask import Flask, request, jsonify, render_template, Response, stream_with_context
+
+from flask import (
+    Flask,
+    request,
+    jsonify,
+    render_template,
+    Response,
+    stream_with_context,
+)
 from flask_cors import CORS
 
 from config import load_settings, Settings
 from stt_service import STTService, BusyError, OOMError
-from transcriber import (
-    transcribe_url,
-    run_stream_job,  # new: SSE job runner (download + streaming transcription)
-)
+from transcriber import transcribe_url, run_stream_job
 
 
 def create_app(config_path: Optional[str] = None) -> Flask:
@@ -71,19 +76,21 @@ def create_app(config_path: Optional[str] = None) -> Flask:
             app.logger.exception("Transcription failed")
             return jsonify(error_code="SERVER_ERROR", message=str(e)), 500
 
-    # ---- NEW: SSE streaming endpoint ----
-    @app.get("/transcribe/stream")
+    # ---- NEW: SSE streaming endpoint (hardened) ----
+    @app.route("/transcribe/stream", methods=["GET", "OPTIONS"])
     def transcribe_stream():
-        """
-        Server-Sent Events stream.
-        Query params: youtube_url, language, chunk_size, safe_mode (0/1), num_speakers, hf_token
-        Emits:
-          event: progress  data: {"stage":"downloading|transcribing|finalizing","pct":float,"note": "..."}
-          event: note      data: {"message": "..."}
-          event: advise    data: {"error_code":"OOM|BUSY", ...}
-          event: done      data: {"transcript":"...", "strategy": {...}, "warnings":[...]}
-          event: error     data: {"message":"..."}
-        """
+        if request.method == "OPTIONS":
+            # Preflight: allow cross-origin GET for SSE
+            return (
+                "",
+                204,
+                {
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type",
+                },
+            )
+
         args = request.args or {}
         url = args.get("youtube_url")
         if not url:
@@ -117,43 +124,53 @@ def create_app(config_path: Optional[str] = None) -> Flask:
                     emit=emit,
                 )
             except BusyError as e:
-                emit("advise", {"error_code": "BUSY", "message": "Transcriber busy.", "retry_after": e.retry_after})
+                emit(
+                    "advise",
+                    {"error_code": "BUSY", "message": "Transcriber busy.", "retry_after": e.retry_after},
+                )
             except OOMError as e:
-                emit("advise", {"error_code": "OOM", "message": "GPU OOM.", "suggestion": e.suggestion})
+                emit(
+                    "advise",
+                    {"error_code": "OOM", "message": "GPU OOM.", "suggestion": e.suggestion},
+                )
             except Exception as e:
                 app.logger.exception("stream job failed")
                 emit("error", {"message": str(e)})
             finally:
-                # signal end of stream to the generator loop
                 q.put({"type": "__end__", "payload": {}})
 
-        t = threading.Thread(target=job, daemon=True)
-        t.start()
+        threading.Thread(target=job, daemon=True).start()
 
-        def sse_format(event: str, data_obj: dict) -> str:
+        def sse(event: str, data_obj: dict) -> str:
             return f"event: {event}\n" + "data: " + json.dumps(data_obj, ensure_ascii=False) + "\n\n"
 
         @stream_with_context
         def gen():
-            last_heartbeat = time.time()
+            # send bytes immediately so proxies keep the pipe open
+            yield ":\n\n"  # SSE comment/heartbeat
+            yield sse("progress", {"stage": "queue", "pct": 1.0})
+            last_ping = time.time()
+
             while True:
                 try:
-                    ev = q.get(timeout=15)  # heartbeat every 15s
+                    ev = q.get(timeout=10)
                     if ev["type"] == "__end__":
                         break
-                    yield sse_format(ev["type"], ev["payload"])
+                    yield sse(ev["type"], ev["payload"])
                 except queue.Empty:
-                    # heartbeat (keeps proxies from closing idle connections)
+                    # heartbeat to avoid idle closes
                     yield ":\n\n"
-                # keep a periodic heartbeat even with constant traffic
-                if time.time() - last_heartbeat > 30:
+                if time.time() - last_ping > 25:
                     yield ":\n\n"
-                    last_heartbeat = time.time()
+                    last_ping = time.time()
 
         headers = {
             "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
             "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type",
+            "X-Accel-Buffering": "no",  # disable Nginx buffering if present
         }
         return Response(gen(), headers=headers, mimetype="text/event-stream")
 
