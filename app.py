@@ -80,7 +80,7 @@ def create_app(config_path: Optional[str] = None) -> Flask:
     @app.route("/transcribe/stream", methods=["GET", "OPTIONS"])
     def transcribe_stream():
         if request.method == "OPTIONS":
-            # Preflight: allow cross-origin GET for SSE
+            # CORS preflight for some hosts/proxies
             return (
                 "",
                 204,
@@ -135,7 +135,8 @@ def create_app(config_path: Optional[str] = None) -> Flask:
                 )
             except Exception as e:
                 app.logger.exception("stream job failed")
-                emit("error", {"message": str(e)})
+                # IMPORTANT: do not use event name "error" (reserved by browsers)
+                emit("server_error", {"message": str(e)})
             finally:
                 q.put({"type": "__end__", "payload": {}})
 
@@ -146,8 +147,8 @@ def create_app(config_path: Optional[str] = None) -> Flask:
 
         @stream_with_context
         def gen():
-            # send bytes immediately so proxies keep the pipe open
-            yield ":\n\n"  # SSE comment/heartbeat
+            # kick bytes immediately so proxies keep the pipe open
+            yield ":\n\n"  # SSE heartbeat
             yield sse("progress", {"stage": "queue", "pct": 1.0})
             last_ping = time.time()
 
@@ -165,12 +166,34 @@ def create_app(config_path: Optional[str] = None) -> Flask:
                     last_ping = time.time()
 
         headers = {
-            "Cache-Control": "no-cache",
+            "Cache-Control": "no-cache, no-transform",
             "Connection": "keep-alive",
             "Access-Control-Allow-Origin": "*",
             "Access-Control-Allow-Methods": "GET, OPTIONS",
             "Access-Control-Allow-Headers": "Content-Type",
-            "X-Accel-Buffering": "no",  # disable Nginx buffering if present
+            "X-Accel-Buffering": "no",  # disable nginx buffering if any
+        }
+        return Response(gen(), headers=headers, mimetype="text/event-stream")
+
+    # ---- NEW: simple SSE test endpoint ----
+    @app.get("/_sse_test")
+    def sse_test():
+        def sse(event, data):
+            return f"event: {event}\n" + "data: " + json.dumps(data) + "\n\n"
+
+        @stream_with_context
+        def gen():
+            yield ":\n\n"
+            for i in range(1, 31):
+                yield sse("progress", {"stage": "test", "pct": round(i / 30 * 100, 1)})
+                time.sleep(1)
+            yield sse("done", {"ok": True})
+
+        headers = {
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+            "X-Accel-Buffering": "no",
         }
         return Response(gen(), headers=headers, mimetype="text/event-stream")
 

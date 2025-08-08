@@ -6,7 +6,6 @@
   <title>YouTube Transcription</title>
   <style>
     :root{
-      /* neutral light defaults before login */
       --bg:#f7f7fb; --card:#ffffff; --text:#1f2030; --muted:#6a5b6f;
       --accent:#4c7dff; --accent-2:#3dd6a5; --danger:#c0392b;
       --border:rgba(0,0,0,.12);
@@ -144,7 +143,7 @@
     const STREAM_URL = API_BASE + '/transcribe/stream';
     const HEALTH_URL = API_BASE + '/healthz';
 
-    // Themes
+    // Themes (soft)
     const THEMES = {
       pink:  { bg:'#fff5fb', card:'#ffffff', text:'#1f2030', muted:'#6a5b6f',
                accent:'#e16bbd', accent2:'#ff9ecf', border:'rgba(0,0,0,.10)',
@@ -161,7 +160,6 @@
       r.setProperty('--border', t.border);
       r.setProperty('--input-bg', t.inputBg); r.setProperty('--input-text', t.inputText);
       r.setProperty('--track', t.track); r.setProperty('--bar-from', t.barFrom); r.setProperty('--bar-to', t.barTo);
-      const box=document.querySelector('.out'); if(box) box.style.background = '#f7f7fb';
       document.body.style.background = t.bg;
     }
 
@@ -233,6 +231,11 @@
         es = new EventSource(url + (url.includes('?') ? '&' : '?') + 'sid=' + sid);
         es.addEventListener('progress', e => handlers.onProgress(JSON.parse(e.data)));
         es.addEventListener('advise',   e => handlers.onAdvise(JSON.parse(e.data)));
+        es.addEventListener('server_error', e => {
+          const d = JSON.parse(e.data || '{}');
+          handlers.onServerError(d);
+          es.close();
+        });
         es.addEventListener('done',     e => { handlers.onDone(JSON.parse(e.data)); es.close(); });
         es.addEventListener('error',    () => {
           es.close(); tries += 1;
@@ -305,6 +308,11 @@
             setTimeout(()=>{ stream.close(); start(); }, (a.retry_after||2)*1000);
           }
         },
+        onServerError: (d)=>{
+          setChip('transcribe','error');
+          show(err, d.message || 'Server error.');
+          go.disabled = false; retrySafe.disabled = false;
+        },
         onDone: (d)=>{
           setStage('finalize','Done.',100);
           out.textContent = d.transcript || '';
@@ -344,6 +352,11 @@
           else if(p.stage === 'finalizing'){ setStage('finalize', 'Finalizing…', p.pct||98); }
         },
         onAdvise: ()=>{},
+        onServerError: (d)=>{
+          setChip('transcribe','error');
+          show(err, d.message || 'Server error.');
+          go.disabled = false; retrySafe.disabled = false;
+        },
         onDone: (d)=>{
           setStage('finalize','Done.',100);
           out.textContent = d.transcript || '';
