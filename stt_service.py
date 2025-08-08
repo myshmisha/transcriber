@@ -6,15 +6,18 @@ from threading import Semaphore
 from typing import Optional, List, Tuple, Dict, Any
 from config import Settings
 
+
 class BusyError(Exception):
     def __init__(self, retry_after: int = 2):
         self.retry_after = retry_after
         super().__init__("Service is busy; please retry.")
 
+
 class OOMError(Exception):
     def __init__(self, suggestion: dict):
         self.suggestion = suggestion
         super().__init__("GPU out of memory")
+
 
 def _pick_gpu(exclude: List[int]) -> Optional[int]:
     gpus = GPUtil.getGPUs()
@@ -26,11 +29,13 @@ def _pick_gpu(exclude: List[int]) -> Optional[int]:
     g = max(gpus, key=lambda x: x.memoryFree)
     return g.id
 
+
 def _gpu_free_mb(gpu_id: int) -> int:
     for g in GPUtil.getGPUs():
         if g.id == gpu_id:
             return int(g.memoryFree)
     return 0
+
 
 def _choose_compute_type(free_mb: int) -> str:
     if free_mb >= 10000:  # >=10GB
@@ -39,15 +44,18 @@ def _choose_compute_type(free_mb: int) -> str:
         return "int8_float16"
     return "int8"
 
+
 class STTService:
     """
     Resident WhisperX + guards for concurrency / OOM.
+    Ensures ALL components use the SAME explicit device (e.g., "cuda:1").
     """
+
     def __init__(self, settings: Settings):
         self.settings = settings
         os.makedirs(self.settings.cache_dir, exist_ok=True)
 
-        # Device selection
+        # ----- Device selection -----
         if not torch.cuda.is_available() or settings.gpu.policy == "cpu":
             self.device = "cpu"
             self.gpu_index = None
@@ -67,18 +75,23 @@ class STTService:
 
         self.compute_type = _choose_compute_type(free_mb) if self.device == "cuda" else "int8"
 
-        # Concurrency semaphore
+        # Canonical device string and set current CUDA device
+        if self.device == "cuda":
+            self.device_str = f"cuda:{self.gpu_index}"
+            torch.cuda.set_device(self.gpu_index)
+        else:
+            self.device_str = "cpu"
+
+        # ----- Concurrency semaphore -----
         self._sem = Semaphore(max(1, int(settings.max_concurrency)))
 
-        # Load GPU/CPU model (primary)
+        # ----- Load main WhisperX model -----
         self.model = whisperx.load_model(
             settings.model_size,
-            device=self.device,
+            device=self.device,  # "cuda" or "cpu"
             device_index=self.gpu_index if self.device == "cuda" else None,
             compute_type=self.compute_type,
         )
-        # if hasattr(self.model, "model"):
-        #     self.model.model.eval()
 
         # Lazy helpers
         self._align = None
@@ -88,12 +101,22 @@ class STTService:
 
     def _ensure_align(self, lang_code: str):
         if self._align is None:
+            # IMPORTANT: explicit device string ("cuda:N")
             self._align, self._align_meta = whisperx.load_align_model(
-                language_code=lang_code, device=self.device
+                language_code=lang_code,
+                device=self.device_str,
             )
 
     def _ensure_diar(self, diar_device: torch.device, hf_token: Optional[str]):
-        if self._diar is None or str(self._diar.device) != str(diar_device):
+        # (Re)create if device differs
+        needs_new = (self._diar is None)
+        if not needs_new:
+            # Some versions of whisperx pipeline may not expose .device cleanly; be defensive
+            try:
+                needs_new = str(getattr(self._diar, "device", "")) != str(diar_device)
+            except Exception:
+                needs_new = False
+        if needs_new:
             self._diar = whisperx.DiarizationPipeline(
                 model_name="pyannote/speaker-diarization",
                 use_auth_token=hf_token,
@@ -107,7 +130,15 @@ class STTService:
                 self.settings.model_size, device="cpu", compute_type="int8"
             )
 
-    def _strategy(self, *, device_used: str, chunk_size: int, diar_on: str, compute_type: str, gpu_index: Optional[int]) -> Dict[str, Any]:
+    def _strategy(
+        self,
+        *,
+        device_used: str,
+        chunk_size: int,
+        diar_on: str,
+        compute_type: str,
+        gpu_index: Optional[int],
+    ) -> Dict[str, Any]:
         return {
             "device": device_used,
             "gpu_index": gpu_index if device_used == "cuda" else None,
@@ -115,6 +146,11 @@ class STTService:
             "compute_type": compute_type,
             "diar_device": diar_on,
         }
+
+    def _set_current_cuda(self):
+        if self.device == "cuda":
+            # Set thread-local current device before any GPU op
+            torch.cuda.set_device(self.gpu_index)
 
     def transcribe(
         self,
@@ -129,11 +165,15 @@ class STTService:
     ) -> Tuple[str, Dict[str, Any], List[str]]:
         """
         Returns (text, strategy, warnings).
-        - On normal mode OOM → raises OOMError with a suggestion dict
-        - On Safe Mode: backoff chunk size and optionally fall back to CPU
+        - Normal mode OOM → raises OOMError with a suggestion dict
+        - Safe Mode: backoff chunk size and optionally fall back to CPU
         """
         warnings: List[str] = []
-        acquire_timeout = (self.settings.acquire_timeout_seconds if acquire_timeout is None else acquire_timeout)
+        acquire_timeout = (
+            self.settings.acquire_timeout_seconds
+            if acquire_timeout is None
+            else acquire_timeout
+        )
 
         # Try to acquire a slot
         acquired = self._sem.acquire(timeout=acquire_timeout)
@@ -143,15 +183,24 @@ class STTService:
         try:
             # Safe mode adjustments
             chosen_chunk = min(chunk_size, self.settings.safe_chunk_size) if safe_mode else chunk_size
-            diar_device = torch.device("cpu") if (safe_mode or self.device == "cpu") else torch.device(f"cuda:{self.gpu_index}")
+            diar_device = (
+                torch.device("cpu")
+                if (safe_mode or self.device != "cuda")
+                else torch.device(self.device_str)
+            )
             model_to_use = self.model
             device_used = self.device
             compute_type = self.compute_type
 
             try:
+                # Ensure current device is set before GPU inference
+                self._set_current_cuda()
                 with torch.inference_mode():
                     result = model_to_use.transcribe(
-                        filename, language=lang, print_progress=False, chunk_size=chosen_chunk
+                        filename,
+                        language=lang,
+                        print_progress=False,
+                        chunk_size=chosen_chunk,
                     )
             except RuntimeError as e:
                 msg = str(e)
@@ -159,7 +208,6 @@ class STTService:
                 if not is_oom:
                     raise
                 if not safe_mode:
-                    # Return a structured OOM so UI can offer Safe Mode
                     suggestion = {
                         "safe_mode": True,
                         "suggested_chunk_size": max(10, chosen_chunk // 2),
@@ -167,7 +215,7 @@ class STTService:
                         "message": "GPU memory was insufficient. Try Safe Mode (smaller chunks, diarization on CPU).",
                     }
                     raise OOMError(suggestion)
-                # Safe mode path: backoff & fallback to CPU if allowed
+                # Safe mode backoff
                 if chosen_chunk > 10:
                     return self.transcribe(
                         filename,
@@ -186,7 +234,10 @@ class STTService:
                     compute_type = "int8"
                     with torch.inference_mode():
                         result = model_to_use.transcribe(
-                            filename, language=lang, print_progress=False, chunk_size=chosen_chunk
+                            filename,
+                            language=lang,
+                            print_progress=False,
+                            chunk_size=chosen_chunk,
                         )
                 else:
                     suggestion = {
@@ -199,19 +250,28 @@ class STTService:
 
             # Optional diarization
             if num_speakers:
+                # Align + diar must also be on the same device
                 self._ensure_align(result["language"])
+                self._set_current_cuda()
                 self._ensure_diar(diar_device, hf_token)
+
+                self._set_current_cuda()
                 diar = self._diar(
-                    filename, min_speakers=num_speakers, max_speakers=num_speakers
+                    filename,
+                    min_speakers=num_speakers,
+                    max_speakers=num_speakers,
                 )
+
+                self._set_current_cuda()
                 aligned = whisperx.align(
                     result["segments"],
                     self._align,
                     self._align_meta,
                     filename,
-                    device=device_used if device_used == "cuda" else "cpu",
+                    device=self.device_str if device_used == "cuda" else "cpu",
                     return_char_alignments=False,
                 )
+
                 final = whisperx.assign_word_speakers(diar, aligned)
                 lines = [
                     f"{s.get('speaker','SPK')} ({s.get('start',0):05.2f}s)  {s.get('text','').strip()}"
