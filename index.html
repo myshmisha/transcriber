@@ -49,15 +49,71 @@
     .alert.error{background:#2b1212; color:#ffd3d3; border-color:#6a2b2b}
     .footer{display:flex; gap:10px; margin-top:14px}
     a.dl{display:none; text-decoration:none}
+
+    /* Theme panel */
+    .theme{display:flex; align-items:center; gap:8px}
+    .theme-panel{position:absolute; right:16px; top:64px; background:var(--card); border:1px solid var(--border); border-radius:12px; padding:12px; display:none; z-index:3}
+    .theme-panel label{font-size:12px; margin-top:4px}
+    .swatch{display:flex; gap:8px; align-items:center}
+    .theme .btn-ghost{padding:8px 10px}
+
+    /* Password gate */
+    .gate{
+      position:fixed; inset:0; background:linear-gradient(180deg,#0b1020,#0a0d1a); display:flex; align-items:center; justify-content:center; z-index:9999;
+    }
+    .gate .panel{
+      width:min(92vw,440px); background:var(--card); border:1px solid var(--border); border-radius:16px; padding:24px; box-shadow:0 10px 30px rgba(0,0,0,.35); text-align:center;
+    }
+    .gate h2{color:var(--text); margin:0 0 10px}
+    .gate p{color:var(--muted); margin:0 0 14px}
+    .gate input[type="password"]{width:100%; padding:12px 14px; background:#0d1330; color:var(--text); border:1px solid var(--border); border-radius:10px; outline:none;}
+    .gate .tiny{font-size:12px; color:var(--muted); margin-top:8px}
+    .fadeout{animation:fadeout .5s ease forwards}
+    @keyframes fadeout{to{opacity:0; visibility:hidden}}
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="card">
-      <div class="head">
-        <div class="title">🎧 YouTube Transcription</div>
-        <div class="badge" id="gpuMeta">GPU: —</div>
+  <!-- Password Gate -->
+  <div class="gate" id="gate">
+    <div class="panel">
+      <h2>Welcome</h2>
+      <p>Enter password to continue</p>
+      <input id="pw" type="password" placeholder="Password"/>
+      <div class="row" style="margin-top:12px; justify-content:center">
+        <button class="btn btn-primary" id="enterBtn">Enter</button>
       </div>
+      <div class="tiny" id="gateMsg"></div>
+    </div>
+  </div>
+
+  <div class="wrap" id="app" style="display:none">
+    <div class="card">
+      <div class="head" style="position:relative">
+        <div class="title">🎧 YouTube Transcription</div>
+        <div class="theme">
+          <button class="btn btn-ghost" id="themeBtn">🎨 Theme</button>
+          <div class="badge" id="gpuMeta">GPU: —</div>
+          <div class="theme-panel" id="themePanel">
+            <div class="swatch">
+              <label>Accent</label>
+              <input type="color" id="cAccent" value="#6c8cff">
+            </div>
+            <div class="swatch">
+              <label>Accent 2</label>
+              <input type="color" id="cAccent2" value="#3dd6a5">
+            </div>
+            <div class="swatch">
+              <label>Background</label>
+              <input type="color" id="cBg" value="#0b1020">
+            </div>
+            <div class="row" style="margin-top:10px">
+              <button class="btn btn-primary" id="saveTheme">Save</button>
+              <button class="btn btn-ghost" id="resetTheme">Reset</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div class="body">
         <div class="grid">
           <div>
@@ -113,6 +169,68 @@
     const API_URL = location.hostname.endsWith('github.io')
       ? 'https://fair-joint-dinosaur.ngrok-free.app/transcribe' // <— update when ngrok rotates
       : '/transcribe';
+
+    // --- Password gate ---
+    const gate = document.getElementById('gate');
+    const app  = document.getElementById('app');
+    const pw   = document.getElementById('pw');
+    const enterBtn = document.getElementById('enterBtn');
+    const gateMsg = document.getElementById('gateMsg');
+
+    function unlock(){
+      gateMsg.textContent = 'Hey shmisha ❤️';
+      localStorage.setItem('authed','1');
+      setTimeout(()=>{ gate.classList.add('fadeout'); setTimeout(()=>{ gate.style.display='none'; app.style.display='block'; }, 450); }, 400);
+    }
+    function checkAuth(){
+      if(localStorage.getItem('authed') === '1'){ gate.style.display='none'; app.style.display='block'; }
+    }
+    enterBtn.addEventListener('click', ()=>{
+      const val = (pw.value||'').trim();
+      if(val === 'droop'){ unlock(); }
+      else{ gateMsg.textContent = 'Nope.'; }
+    });
+    pw.addEventListener('keydown', (e)=>{ if(e.key==='Enter') enterBtn.click(); });
+    checkAuth();
+
+    // --- Theme picker ---
+    const themeBtn = document.getElementById('themeBtn');
+    const themePanel = document.getElementById('themePanel');
+    const cAccent = document.getElementById('cAccent');
+    const cAccent2 = document.getElementById('cAccent2');
+    const cBg = document.getElementById('cBg');
+    const saveTheme = document.getElementById('saveTheme');
+    const resetTheme = document.getElementById('resetTheme');
+
+    function loadTheme(){
+      const t = JSON.parse(localStorage.getItem('theme')||'{}');
+      if(t.accent) document.documentElement.style.setProperty('--accent', t.accent), cAccent.value=t.accent;
+      if(t.accent2) document.documentElement.style.setProperty('--accent-2', t.accent2), cAccent2.value=t.accent2;
+      if(t.bg){
+        document.documentElement.style.setProperty('--bg', t.bg);
+        cBg.value = t.bg;
+        document.body.style.background = `linear-gradient(180deg, ${t.bg}, #0a0d1a)`;
+      }
+    }
+    function saveThemeNow(){
+      const t = { accent: cAccent.value, accent2: cAccent2.value, bg: cBg.value };
+      localStorage.setItem('theme', JSON.stringify(t));
+      loadTheme();
+    }
+    function resetThemeNow(){
+      localStorage.removeItem('theme');
+      document.documentElement.style.setProperty('--accent', '#6c8cff');
+      document.documentElement.style.setProperty('--accent-2', '#3dd6a5');
+      document.documentElement.style.setProperty('--bg', '#0b1020');
+      document.body.style.background = 'linear-gradient(180deg,#0b1020,#0a0d1a)';
+      cAccent.value = '#6c8cff'; cAccent2.value = '#3dd6a5'; cBg.value = '#0b1020';
+    }
+    themeBtn.addEventListener('click', ()=>{
+      themePanel.style.display = themePanel.style.display==='block' ? 'none' : 'block';
+    });
+    saveTheme.addEventListener('click', saveThemeNow);
+    resetTheme.addEventListener('click', resetThemeNow);
+    loadTheme();
 
     // --- UI refs ---
     const el = (id)=>document.getElementById(id);
