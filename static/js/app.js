@@ -1,3 +1,5 @@
+const API_URL = 'https://fair-joint-dinosaur.ngrok-free.app/transcribe';
+
 const youtubeUrlInput = document.getElementById('youtube-url');
 const languageSelect  = document.getElementById('language');
 const chunkInput      = document.getElementById('chunk');
