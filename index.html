@@ -6,50 +6,56 @@
   <title>YouTube Transcription</title>
   <style>
     :root{
-      --bg:#101426; --card:#151a33; --text:#e7ecff; --muted:#97a0c2; --accent:#6c8cff; --accent-2:#3dd6a5; --danger:#ff6b6b;
-      --border: rgba(255,255,255,.08);
+      /* neutral light defaults before login */
+      --bg:#f7f7fb; --card:#ffffff; --text:#1f2030; --muted:#6a5b6f;
+      --accent:#4c7dff; --accent-2:#3dd6a5; --danger:#c0392b;
+      --border:rgba(0,0,0,.12);
+      --input-bg:#ffffff; --input-text:#1f2030;
+      --track:#eef1f6; --bar-from:#4c7dff; --bar-to:#8fb0ff;
     }
     *{box-sizing:border-box}
     body{margin:0; font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background:var(--bg);}
     .wrap{max-width:960px;margin:40px auto;padding:0 16px}
-    .card{background:var(--card); border:1px solid var(--border); border-radius:16px; box-shadow:0 10px 30px rgba(0,0,0,.25); overflow:hidden;}
+    .card{background:var(--card); border:1px solid var(--border); border-radius:16px; box-shadow:0 10px 30px rgba(0,0,0,.08); overflow:hidden;}
     .head{padding:22px 24px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; gap:12px}
     .title{color:var(--text); font-weight:700; font-size:20px; letter-spacing:.3px; display:flex; align-items:center; gap:10px}
     .badge{padding:4px 10px; border-radius:999px; font-size:12px; border:1px solid var(--border); color:var(--muted)}
     .body{padding:24px}
     label{display:block; color:var(--muted); font-size:13px; margin:10px 0 6px}
     input[type="text"], select, input[type="number"], input[type="password"]{
-      width:100%; padding:12px 14px; background:#0e1430; color:var(--text); border:1px solid var(--border); border-radius:10px; outline:none;
+      width:100%; padding:12px 14px; background:var(--input-bg); color:var(--input-text);
+      border:1px solid var(--border); border-radius:10px; outline:none;
     }
-    input::placeholder{color:#7580a8}
+    input::placeholder{color:#9aa2b2}
     .grid{display:grid; grid-template-columns:1fr; gap:12px}
     @media (min-width:720px){ .grid{grid-template-columns: 1.8fr .7fr .7fr} }
     .row{display:flex; gap:12px; align-items:center}
-    .btn{appearance:none; border:0; padding:12px 14px; border-radius:10px; cursor:pointer; font-weight:600; letter-spacing:.2px; transition:.2s}
+    .btn{appearance:none; border:0; padding:12px 14px; border-radius:10px; cursor:pointer; font-weight:600; letter-spacing:.2px; transition:.15s}
     .btn-primary{background:var(--accent); color:white}
     .btn-ghost{background:transparent; color:var(--accent); border:1px solid var(--accent)}
     .btn:disabled{opacity:.6; cursor:not-allowed}
     .status{display:flex; gap:8px; flex-wrap:wrap; margin:10px 0 14px}
-    .chip{display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px; border:1px solid var(--border); color:var(--muted); font-size:12px}
+    .chip{display:inline-flex; align-items:center; gap:8px; padding:8px 12px; border-radius:999px; border:1px solid var(--border); color:var(--muted); font-size:12px; background:#fff}
     .chip .dot{width:8px; height:8px; border-radius:50%;}
-    .chip.active{color:var(--text); border-color:#2b376a}
+    .chip.active{color:var(--text); border-color:var(--accent)}
     .chip.active .dot{background:var(--accent)}
-    .chip.done{color:#9ff0cf; border-color:#2b6a53}
+    .chip.done{color:#1e8e5b; border-color:#bfe9d8; background:#e9fbf5}
     .chip.done .dot{background:var(--accent-2)}
-    .chip.error{color:#ffd6d6; border-color:#6a2b2b}
+    .chip.error{color:#a73a3a; border-color:#f3c2c2; background:#ffe9e9}
     .chip.error .dot{background:var(--danger)}
-    .progress{height:10px; background:#0e1430; border:1px solid var(--border); border-radius:999px; overflow:hidden}
-    .bar{height:100%; width:0%; background:linear-gradient(90deg,var(--accent),#8aa6ff); transition:width .2s ease}
+    .progress{height:10px; background:var(--track); border:1px solid var(--border); border-radius:999px; overflow:hidden}
+    .bar{height:100%; width:0%; background:linear-gradient(90deg,var(--bar-from),var(--bar-to)); transition:width .2s ease}
     .help{color:var(--muted); font-size:12px; margin-top:8px}
-    .out{margin-top:18px; padding:16px; background:#0b1230; border:1px solid var(--border); color:#d8ddff; white-space:pre-wrap; border-radius:12px; display:none}
-    .meta{margin-top:10px; padding:10px; border:1px dashed var(--border); color:#bfc8ff; font-size:12px; border-radius:10px; display:none}
+    .out{margin-top:18px; padding:16px; background:#f7f7fb; border:1px solid var(--border); color:var(--text); white-space:pre-wrap; border-radius:12px; display:none}
+    .meta{margin-top:10px; padding:10px; border:1px dashed var(--border); color:#40465a; font-size:12px; border-radius:10px; display:none; background:#fff}
     .alert{margin-top:12px; padding:12px; border-radius:12px; display:none; font-size:14px; border:1px solid}
-    .alert.info{background:#0c153a; color:#bcd0ff; border-color:#233066}
-    .alert.success{background:#0e2b27; color:#c9ffe9; border-color:#265e56}
-    .alert.error{background:#2b1212; color:#ffd3d3; border-color:#6a2b2b}
+    .alert.info{background:#eef3ff; color:#2b3e86; border-color:#cfdafc}
+    .alert.success{background:#e9fbf5; color:#1e8e5b; border-color:#bfe9d8}
+    .alert.error{background:#ffe9e9; color:#a73a3a; border-color:#f3c2c2}
     .footer{display:flex; gap:10px; margin-top:14px; justify-content:flex-end;}
     a.dl{display:none; text-decoration:none}
 
+    /* Gate */
     .gate{position:fixed; inset:0; background:var(--bg); display:flex; align-items:center; justify-content:center; z-index:9999;}
     .gate .panel{width:min(92vw,440px); background:var(--card); border:1px solid var(--border); border-radius:16px; padding:24px; text-align:center;}
     .gate h2{color:var(--text); margin:0 0 10px}
@@ -131,17 +137,21 @@
   </div>
 
   <script>
-    // API endpoints (SSE version expected on backend)
+    // API base (GitHub Pages -> ngrok; else same-origin)
     const API_BASE = location.hostname.endsWith('github.io')
       ? 'https://fair-joint-dinosaur.ngrok-free.app'
       : '';
     const STREAM_URL = API_BASE + '/transcribe/stream';
     const HEALTH_URL = API_BASE + '/healthz';
 
-    // Themes for gate
+    // Themes
     const THEMES = {
-      pink:  { bg:'#fde7f4', card:'#ffffff', text:'#2a2230', muted:'#6a5b6f', accent:'#e16bbd', accent2:'#ff9ecf', border:'rgba(0,0,0,.10)' },
-      light: { bg:'#ffffff', card:'#ffffff', text:'#1b1f2a', muted:'#5c6473', accent:'#4c7dff', accent2:'#3dd6a5', border:'rgba(0,0,0,.12)' }
+      pink:  { bg:'#fff5fb', card:'#ffffff', text:'#1f2030', muted:'#6a5b6f',
+               accent:'#e16bbd', accent2:'#ff9ecf', border:'rgba(0,0,0,.10)',
+               inputBg:'#ffffff', inputText:'#1f2030', track:'#ffe6f3', barFrom:'#ff7fc7', barTo:'#ffb3dd' },
+      light: { bg:'#ffffff', card:'#ffffff', text:'#1f2030', muted:'#5c6473',
+               accent:'#4c7dff', accent2:'#3dd6a5', border:'rgba(0,0,0,.12)',
+               inputBg:'#ffffff', inputText:'#1f2030', track:'#eef1f6', barFrom:'#4c7dff', barTo:'#8fb0ff' }
     };
     function applyTheme(t){
       const r = document.documentElement.style;
@@ -149,7 +159,10 @@
       r.setProperty('--text', t.text); r.setProperty('--muted', t.muted);
       r.setProperty('--accent', t.accent); r.setProperty('--accent-2', t.accent2);
       r.setProperty('--border', t.border);
-      if(t.bg === '#ffffff'){ const box=document.querySelector('.out'); if(box) box.style.background = '#f7f7fb'; }
+      r.setProperty('--input-bg', t.inputBg); r.setProperty('--input-text', t.inputText);
+      r.setProperty('--track', t.track); r.setProperty('--bar-from', t.barFrom); r.setProperty('--bar-to', t.barTo);
+      const box=document.querySelector('.out'); if(box) box.style.background = '#f7f7fb';
+      document.body.style.background = t.bg;
     }
 
     // Gate
@@ -212,7 +225,29 @@
     }
     health();
 
-    function openSSE(url){ return new EventSource(url, { withCredentials: false }); }
+    // SSE with retry (3 attempts)
+    function openSSEWithRetry(url, handlers) {
+      let tries = 0, es;
+      const connect = () => {
+        const sid = Date.now();
+        es = new EventSource(url + (url.includes('?') ? '&' : '?') + 'sid=' + sid);
+        es.addEventListener('progress', e => handlers.onProgress(JSON.parse(e.data)));
+        es.addEventListener('advise',   e => handlers.onAdvise(JSON.parse(e.data)));
+        es.addEventListener('done',     e => { handlers.onDone(JSON.parse(e.data)); es.close(); });
+        es.addEventListener('error',    () => {
+          es.close(); tries += 1;
+          if (tries <= 3) {
+            note.style.display='block';
+            note.textContent = `Connection hiccup… retrying (${tries}/3)…`;
+            setTimeout(connect, [800,1500,3000][tries-1]);
+          } else {
+            handlers.onHardError();
+          }
+        });
+      };
+      connect();
+      return { close: ()=> es && es.close() };
+    }
 
     // Copy helper
     async function copyTranscript(){
@@ -222,7 +257,6 @@
         if (navigator.clipboard && navigator.clipboard.writeText) {
           await navigator.clipboard.writeText(text);
         } else {
-          // fallback
           const ta = document.createElement('textarea');
           ta.value = text; document.body.appendChild(ta);
           ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
@@ -248,96 +282,87 @@
       const lang = langI.value;
       const chunk = Number(chunkI.value || 30);
 
-      const qs = new URLSearchParams({ youtube_url:url, language:lang, chunk_size:String(chunk), safe_mode:'0' });
-      const es = openSSE(`${STREAM_URL}?${qs.toString()}`);
-
-      es.addEventListener('progress', (ev)=>{
-        const p = JSON.parse(ev.data);
-        if(p.stage === 'downloading'){ setStage('download', `Downloading… ${p.pct!=null? p.pct+'%':''} ${p.note? '• '+p.note:''}`, p.pct||10); }
-        else if(p.stage === 'transcribing'){ setStage('transcribe', `Transcribing… ${p.pct!=null? p.pct+'%':''}`, p.pct||80); }
-        else if(p.stage === 'finalizing'){ setStage('finalize', 'Finalizing…', p.pct||98); }
-      });
-
-      es.addEventListener('advise', (ev)=>{
-        const a = JSON.parse(ev.data);
-        if(a.error_code === 'OOM'){
-          setChip('transcribe','error');
-          show(err, (a.suggestion && a.suggestion.message) || 'GPU OOM.');
-          retrySafe.style.display='inline-block';
-          const nextChunk = (a.suggestion && a.suggestion.suggested_chunk_size) || Math.max(10, Math.floor(chunk/2));
-          retrySafe.onclick = ()=>{
-            es.close();
-            const qs2 = new URLSearchParams({ youtube_url:url, language:lang, chunk_size:String(nextChunk), safe_mode:'1' });
-            startSafe(`${STREAM_URL}?${qs2.toString()}`);
-          };
-        } else if (a.error_code === 'BUSY'){
-          setStage('queue', `Server busy — retrying in ${a.retry_after||2}s…`, 5);
-          setTimeout(()=>{ es.close(); start(); }, (a.retry_after||2)*1000);
-        }
-      });
-
-      es.addEventListener('done', (ev)=>{
-        const d = JSON.parse(ev.data);
-        setStage('finalize','Done.',100);
-        out.textContent = d.transcript || '';
-        out.style.display='block';
-        meta.style.display='block';
-        meta.innerHTML = `
-          <strong>Device:</strong> ${d.strategy?.device}${d.strategy?.gpu_index!=null?' #'+d.strategy?.gpu_index:''}
-          &nbsp;•&nbsp; <strong>Compute:</strong> ${d.strategy?.compute_type}
-          &nbsp;•&nbsp; <strong>Chunk:</strong> ${d.strategy?.chunk_size}
-          &nbsp;•&nbsp; <strong>Diar:</strong> ${d.strategy?.diar_device}
-          ${d.warnings && d.warnings.length ? '<br><em>'+d.warnings.join(' • ')+'</em>' : '' }
-        `;
-        // buttons
-        const blob = new Blob([d.transcript||''], {type:'text/plain'});
-        dl.href = URL.createObjectURL(blob);
-        dl.style.display = 'inline-block';
-        dl.textContent = 'Download transcript';
-        copyBtn.style.display = 'inline-block';
-
-        show(ok,'Done.');
-        chips.forEach(c=>c.classList.add('done'));
-        retrySafe.style.display='none';
-        es.close();
-        go.disabled = false; retrySafe.disabled = false;
-      });
-
-      es.addEventListener('error', ()=>{
-        setChip('transcribe','error');
-        show(err, 'Stream error.');
-        es.close();
-        go.disabled = false; retrySafe.disabled = false;
-      });
-
-      function startSafe(url2){
-        clearAlerts();
-        setStage('transcribe','Transcribing (Safe Mode)…', 10);
-        const es2 = openSSE(url2);
-        es2.addEventListener('progress', (ev)=>{
-          const p = JSON.parse(ev.data);
-          if(p.stage === 'transcribing'){ setStage('transcribe', `Transcribing… ${p.pct!=null? p.pct+'%':''}`, p.pct||60); }
+      const qs = new URLSearchParams({ youtube_url:url, language:lang, chunk_size:String(chunk), safe_mode:'0' }).toString();
+      const stream = openSSEWithRetry(`${STREAM_URL}?${qs}`, {
+        onProgress: (p)=>{
+          if(p.stage === 'downloading'){ setStage('download', `Downloading… ${p.pct!=null? p.pct+'%':''} ${p.note? '• '+p.note:''}`, p.pct||10); }
+          else if(p.stage === 'transcribing'){ setStage('transcribe', `Transcribing… ${p.pct!=null? p.pct+'%':''}`, p.pct||80); }
           else if(p.stage === 'finalizing'){ setStage('finalize', 'Finalizing…', p.pct||98); }
-        });
-        es2.addEventListener('done', (ev)=>{
-          const d = JSON.parse(ev.data);
+        },
+        onAdvise: (a)=>{
+          if(a.error_code === 'OOM'){
+            setChip('transcribe','error');
+            show(err, (a.suggestion && a.suggestion.message) || 'GPU OOM.');
+            retrySafe.style.display='inline-block';
+            const nextChunk = (a.suggestion && a.suggestion.suggested_chunk_size) || Math.max(10, Math.floor(chunk/2));
+            retrySafe.onclick = ()=>{
+              stream.close();
+              const qs2 = new URLSearchParams({ youtube_url:url, language:lang, chunk_size:String(nextChunk), safe_mode:'1' }).toString();
+              startSafe(`${STREAM_URL}?${qs2}`);
+            };
+          } else if (a.error_code === 'BUSY'){
+            setStage('queue', `Server busy — retrying in ${a.retry_after||2}s…`, 5);
+            setTimeout(()=>{ stream.close(); start(); }, (a.retry_after||2)*1000);
+          }
+        },
+        onDone: (d)=>{
           setStage('finalize','Done.',100);
           out.textContent = d.transcript || '';
           out.style.display='block';
-          // buttons
+          meta.style.display='block';
+          meta.innerHTML = `
+            <strong>Device:</strong> ${d.strategy?.device}${d.strategy?.gpu_index!=null?' #'+d.strategy?.gpu_index:''}
+            &nbsp;•&nbsp; <strong>Compute:</strong> ${d.strategy?.compute_type}
+            &nbsp;•&nbsp; <strong>Chunk:</strong> ${d.strategy?.chunk_size}
+            &nbsp;•&nbsp; <strong>Diar:</strong> ${d.strategy?.diar_device}
+            ${d.warnings && d.warnings.length ? '<br><em>'+d.warnings.join(' • ')+'</em>' : '' }
+          `;
           const blob = new Blob([d.transcript||''], {type:'text/plain'});
           dl.href = URL.createObjectURL(blob);
           dl.style.display = 'inline-block';
           dl.textContent = 'Download transcript';
           copyBtn.style.display = 'inline-block';
-
           show(ok,'Done.');
           chips.forEach(c=>c.classList.add('done'));
-          es2.close();
+          retrySafe.style.display='none';
           go.disabled = false; retrySafe.disabled = false;
-        });
-        es2.addEventListener('error', ()=>{ show(err, 'Stream error.'); es2.close(); go.disabled=false; });
-      }
+        },
+        onHardError: ()=>{
+          setChip('transcribe','error');
+          show(err, 'Stream error.');
+          go.disabled = false; retrySafe.disabled = false;
+        }
+      });
+    }
+
+    function startSafe(url2){
+      clearAlerts();
+      setStage('transcribe','Transcribing (Safe Mode)…', 10);
+      const s2 = openSSEWithRetry(url2, {
+        onProgress: (p)=>{
+          if(p.stage === 'transcribing'){ setStage('transcribe', `Transcribing… ${p.pct!=null? p.pct+'%':''}`, p.pct||60); }
+          else if(p.stage === 'finalizing'){ setStage('finalize', 'Finalizing…', p.pct||98); }
+        },
+        onAdvise: ()=>{},
+        onDone: (d)=>{
+          setStage('finalize','Done.',100);
+          out.textContent = d.transcript || '';
+          out.style.display='block';
+          const blob = new Blob([d.transcript||''], {type:'text/plain'});
+          dl.href = URL.createObjectURL(blob);
+          dl.style.display = 'inline-block';
+          dl.textContent = 'Download transcript';
+          copyBtn.style.display = 'inline-block';
+          show(ok,'Done.');
+          chips.forEach(c=>c.classList.add('done'));
+          go.disabled = false; retrySafe.disabled = false;
+        },
+        onHardError: ()=>{
+          setChip('transcribe','error');
+          show(err, 'Stream error.');
+          go.disabled = false;
+        }
+      });
     }
 
     document.getElementById('go').addEventListener('click', start);
