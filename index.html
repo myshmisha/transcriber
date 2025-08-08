@@ -6,7 +6,6 @@
   <title>YouTube Transcription</title>
   <style>
     :root{
-      /* default neutral theme (solid color) */
       --bg:#101426; --card:#151a33; --text:#e7ecff; --muted:#97a0c2; --accent:#6c8cff; --accent-2:#3dd6a5; --danger:#ff6b6b;
       --border: rgba(255,255,255,.08);
     }
@@ -40,7 +39,7 @@
     .chip.error{color:#ffd6d6; border-color:#6a2b2b}
     .chip.error .dot{background:var(--danger)}
     .progress{height:10px; background:#0e1430; border:1px solid var(--border); border-radius:999px; overflow:hidden}
-    .bar{height:100%; width:0%; background:linear-gradient(90deg,var(--accent),#8aa6ff); transition:width .25s ease}
+    .bar{height:100%; width:0%; background:linear-gradient(90deg,var(--accent),#8aa6ff); transition:width .2s ease}
     .help{color:var(--muted); font-size:12px; margin-top:8px}
     .out{margin-top:18px; padding:16px; background:#0b1230; border:1px solid var(--border); color:#d8ddff; white-space:pre-wrap; border-radius:12px; display:none}
     .meta{margin-top:10px; padding:10px; border:1px dashed var(--border); color:#bfc8ff; font-size:12px; border-radius:10px; display:none}
@@ -48,12 +47,11 @@
     .alert.info{background:#0c153a; color:#bcd0ff; border-color:#233066}
     .alert.success{background:#0e2b27; color:#c9ffe9; border-color:#265e56}
     .alert.error{background:#2b1212; color:#ffd3d3; border-color:#6a2b2b}
-    .footer{display:flex; gap:10px; margin-top:14px}
+    .footer{display:flex; gap:10px; margin-top:14px; justify-content:flex-end;}
     a.dl{display:none; text-decoration:none}
 
-    /* Gate (no fades, just show/hide) */
     .gate{position:fixed; inset:0; background:var(--bg); display:flex; align-items:center; justify-content:center; z-index:9999;}
-    .gate .panel{width:min(92vw,440px); background:var(--card); border:1px solid var(--border); border-radius:16px; padding:24px; box-shadow:0 10px 30px rgba(0,0,0,.35); text-align:center;}
+    .gate .panel{width:min(92vw,440px); background:var(--card); border:1px solid var(--border); border-radius:16px; padding:24px; text-align:center;}
     .gate h2{color:var(--text); margin:0 0 10px}
     .gate p{color:var(--muted); margin:0 0 14px}
     .bigmsg{font-size:28px; font-weight:800; color:var(--text); margin:10px 0 14px; display:none;}
@@ -61,7 +59,7 @@
   </style>
 </head>
 <body>
-  <!-- Password Gate -->
+  <!-- Gate -->
   <div class="gate" id="gate">
     <div class="panel">
       <h2>Welcome</h2>
@@ -125,6 +123,7 @@
 
         <pre class="out" id="out"></pre>
         <div class="footer">
+          <button class="btn btn-ghost" id="copyBtn" style="display:none">Copy</button>
           <a class="btn btn-ghost dl" id="dl" download="transcript.txt">Download transcript</a>
         </div>
       </div>
@@ -132,30 +131,28 @@
   </div>
 
   <script>
-    // --- API endpoint ---
-    const API_URL = location.hostname.endsWith('github.io')
-      ? 'https://fair-joint-dinosaur.ngrok-free.app/transcribe' // update when ngrok rotates
-      : '/transcribe';
+    // API endpoints (SSE version expected on backend)
+    const API_BASE = location.hostname.endsWith('github.io')
+      ? 'https://fair-joint-dinosaur.ngrok-free.app'
+      : '';
+    const STREAM_URL = API_BASE + '/transcribe/stream';
+    const HEALTH_URL = API_BASE + '/healthz';
 
-    // --- Themes to apply on unlock ---
+    // Themes for gate
     const THEMES = {
       pink:  { bg:'#fde7f4', card:'#ffffff', text:'#2a2230', muted:'#6a5b6f', accent:'#e16bbd', accent2:'#ff9ecf', border:'rgba(0,0,0,.10)' },
       light: { bg:'#ffffff', card:'#ffffff', text:'#1b1f2a', muted:'#5c6473', accent:'#4c7dff', accent2:'#3dd6a5', border:'rgba(0,0,0,.12)' }
     };
     function applyTheme(t){
       const r = document.documentElement.style;
-      r.setProperty('--bg', t.bg);
-      r.setProperty('--card', t.card);
-      r.setProperty('--text', t.text);
-      r.setProperty('--muted', t.muted);
-      r.setProperty('--accent', t.accent);
-      r.setProperty('--accent-2', t.accent2);
+      r.setProperty('--bg', t.bg); r.setProperty('--card', t.card);
+      r.setProperty('--text', t.text); r.setProperty('--muted', t.muted);
+      r.setProperty('--accent', t.accent); r.setProperty('--accent-2', t.accent2);
       r.setProperty('--border', t.border);
-      // also fix the transcript box bg if on very light theme
-      if(t.bg === '#ffffff'){ document.querySelector('.out').style.background = '#f7f7fb'; }
+      if(t.bg === '#ffffff'){ const box=document.querySelector('.out'); if(box) box.style.background = '#f7f7fb'; }
     }
 
-    // --- Gate logic (no fades; show message BIG for 1s) ---
+    // Gate
     const gate = document.getElementById('gate');
     const app  = document.getElementById('app');
     const pw   = document.getElementById('pw');
@@ -171,24 +168,18 @@
       setTimeout(() => {
         gate.style.display = 'none';
         app.style.display = 'block';
-        // hide the big message after showing 1s
         bigMsg.style.display = 'none';
       }, 1000);
     }
-
     enterBtn.addEventListener('click', ()=>{
       const val = (pw.value||'').trim().toLowerCase();
-      if(val === 'droop'){
-        unlock(THEMES.pink, 'Hey Shmisha 🌸');
-      }else if(val === 'goofy'){
-        unlock(THEMES.light, 'Hey Sunflower 🌻');
-      }else{
-        gateMsg.textContent = 'Nope.';
-      }
+      if(val === 'droop'){ unlock(THEMES.pink,  'Hey Shmisha 🌸'); }
+      else if(val === 'goofy'){ unlock(THEMES.light, 'Hey Sunflower 🌻'); }
+      else{ gateMsg.textContent = 'Nope.'; }
     });
     pw.addEventListener('keydown', (e)=>{ if(e.key==='Enter') enterBtn.click(); });
 
-    // --- UI refs ---
+    // UI refs
     const $ = (id)=>document.getElementById(id);
     const go = $('go'), retrySafe = $('retrySafe');
     const urlI = $('youtube-url'), langI = $('language'), chunkI = $('chunk');
@@ -196,27 +187,24 @@
     const bar = $('bar'), hint = $('hint');
     const note = $('note'), err = $('err'), ok = $('ok');
     const out = $('out'), dl = $('dl'), meta = $('meta'), gpuMeta = $('gpuMeta');
+    const copyBtn = $('copyBtn');
 
-    // --- helpers ---
-    function setChip(step, state){ // state: active | done | error | reset
+    function setChip(step, state){
       chips.forEach(c=>{
         const s = c.getAttribute('data-step');
         c.classList.remove('active','done','error');
-        if (state==='reset') return;
         if (s===step) c.classList.add(state);
       });
     }
     function setStage(step,label,progress){
-      setChip(step,'active');
-      bar.style.width = progress + '%';
-      hint.textContent = label;
+      setChip(step,'active'); bar.style.width = (progress||0) + '%'; hint.textContent = label;
     }
     function clearAlerts(){ note.style.display=err.style.display=ok.style.display='none'; }
     function show(a, msg){ a.textContent = msg; a.style.display='block'; }
 
     async function health(){
       try{
-        const r = await fetch(API_URL.replace('/transcribe','/healthz'), {cache:'no-store'});
+        const r = await fetch(HEALTH_URL, {cache:'no-store'});
         if(!r.ok) return;
         const j = await r.json();
         gpuMeta.textContent = `GPU: ${j.device}${j.gpu_index!==null?` #${j.gpu_index}`:''} • ${j.compute_type} • ${j.model_size}`;
@@ -224,107 +212,135 @@
     }
     health();
 
-    // Simulated progress (until we wire SSE)
-    let tick=null, target=0;
-    function startSimulatedProgress(){
-      let p=0; target=10; bar.style.width='0%';
-      tick = setInterval(()=>{
-        if(p<target){ p += Math.max(0.3, (target-p)*0.08); bar.style.width=p+'%'; }
-      }, 80);
-      return ()=>{ clearInterval(tick); bar.style.width='100%'; };
-    }
-    function bump(to,label,step){ target=to; setStage(step,label,to); }
+    function openSSE(url){ return new EventSource(url, { withCredentials: false }); }
 
-    async function run(safe=false, overrideChunk=null){
+    // Copy helper
+    async function copyTranscript(){
+      try{
+        const text = out.textContent || '';
+        if (!text) return;
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(text);
+        } else {
+          // fallback
+          const ta = document.createElement('textarea');
+          ta.value = text; document.body.appendChild(ta);
+          ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
+        }
+        show(ok, 'Copied to clipboard.');
+        setTimeout(()=>{ ok.style.display='none'; }, 1500);
+      } catch(e){
+        show(err, 'Copy failed.');
+      }
+    }
+    copyBtn.addEventListener('click', copyTranscript);
+
+    function start() {
       clearAlerts();
-      out.style.display='none'; dl.style.display='none'; meta.style.display='none';
+      out.style.display='none'; dl.style.display='none'; copyBtn.style.display='none'; meta.style.display='none';
       go.disabled = true; retrySafe.disabled = true;
 
-      // reset chips
       chips.forEach(c=>c.classList.remove('active','done','error'));
-      setChip('queue','active');
-      bar.style.width='0%'; hint.textContent='Queued…';
+      setStage('queue','Queued…', 1);
 
-      // basic validation
       const url = (urlI.value||'').trim();
       if(!/^https?:\/\//.test(url)){ show(err,'Please enter a valid YouTube URL (http/https).'); go.disabled=false; return; }
-
       const lang = langI.value;
-      const chunk = Number(overrideChunk ?? (chunkI.value||30));
+      const chunk = Number(chunkI.value || 30);
 
-      // kick off simulated progress
-      const finish = startSimulatedProgress();
-      bump(15,'Downloading audio…','download');
+      const qs = new URLSearchParams({ youtube_url:url, language:lang, chunk_size:String(chunk), safe_mode:'0' });
+      const es = openSSE(`${STREAM_URL}?${qs.toString()}`);
 
-      try{
-        // After a moment, move to “Transcribing…”
-        setTimeout(()=> bump(85,'Transcribing…','transcribe'), 900);
+      es.addEventListener('progress', (ev)=>{
+        const p = JSON.parse(ev.data);
+        if(p.stage === 'downloading'){ setStage('download', `Downloading… ${p.pct!=null? p.pct+'%':''} ${p.note? '• '+p.note:''}`, p.pct||10); }
+        else if(p.stage === 'transcribing'){ setStage('transcribe', `Transcribing… ${p.pct!=null? p.pct+'%':''}`, p.pct||80); }
+        else if(p.stage === 'finalizing'){ setStage('finalize', 'Finalizing…', p.pct||98); }
+      });
 
-        const res = await fetch(API_URL, {
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({
-            youtube_url: url,
-            language: lang,
-            chunk_size: chunk,
-            safe_mode: safe
-          })
-        });
-
-        const ct = res.headers.get('content-type') || '';
-        const payload = ct.includes('application/json') ? await res.json() : { error_code:'SERVER_ERROR', message: await res.text() };
-
-        if(!res.ok){
-          if(payload && payload.error_code==='OOM'){
-            setChip('transcribe','error'); bump(90,'Out of memory — consider Safe Mode','finalize');
-            show(err, (payload.suggestion && payload.suggestion.message) || 'GPU memory was insufficient.');
-            retrySafe.style.display='inline-block';
-            const nextChunk = (payload.suggestion && payload.suggestion.suggested_chunk_size) || Math.max(10, Math.floor(chunk/2));
-            retrySafe.onclick = ()=> run(true, nextChunk);
-            return;
-          }
-          if(payload && payload.error_code==='BUSY'){
-            setChip('queue','active'); bump(5,'Server busy — retrying shortly…','queue');
-            show(note, `Server busy. Auto-retrying in ${payload.retry_after || 2}s…`);
-            setTimeout(()=> run(safe, chunk), (payload.retry_after || 2)*1000);
-            return;
-          }
+      es.addEventListener('advise', (ev)=>{
+        const a = JSON.parse(ev.data);
+        if(a.error_code === 'OOM'){
           setChip('transcribe','error');
-          show(err, payload.message || 'Server error.');
-          return;
+          show(err, (a.suggestion && a.suggestion.message) || 'GPU OOM.');
+          retrySafe.style.display='inline-block';
+          const nextChunk = (a.suggestion && a.suggestion.suggested_chunk_size) || Math.max(10, Math.floor(chunk/2));
+          retrySafe.onclick = ()=>{
+            es.close();
+            const qs2 = new URLSearchParams({ youtube_url:url, language:lang, chunk_size:String(nextChunk), safe_mode:'1' });
+            startSafe(`${STREAM_URL}?${qs2.toString()}`);
+          };
+        } else if (a.error_code === 'BUSY'){
+          setStage('queue', `Server busy — retrying in ${a.retry_after||2}s…`, 5);
+          setTimeout(()=>{ es.close(); start(); }, (a.retry_after||2)*1000);
         }
+      });
 
-        bump(98,'Finalizing…','finalize');
-        const text = payload.transcript || '';
-        out.textContent = text; out.style.display='block';
-        meta.style.display = 'block';
+      es.addEventListener('done', (ev)=>{
+        const d = JSON.parse(ev.data);
+        setStage('finalize','Done.',100);
+        out.textContent = d.transcript || '';
+        out.style.display='block';
+        meta.style.display='block';
         meta.innerHTML = `
-          <strong>Device:</strong> ${payload.strategy?.device}${payload.strategy?.gpu_index!=null?' #'+payload.strategy?.gpu_index:''}
-          &nbsp;•&nbsp; <strong>Compute:</strong> ${payload.strategy?.compute_type}
-          &nbsp;•&nbsp; <strong>Chunk:</strong> ${payload.strategy?.chunk_size}
-          &nbsp;•&nbsp; <strong>Diar:</strong> ${payload.strategy?.diar_device}
-          ${payload.warnings && payload.warnings.length ? '<br><em>'+payload.warnings.join(' • ')+'</em>' : '' }
+          <strong>Device:</strong> ${d.strategy?.device}${d.strategy?.gpu_index!=null?' #'+d.strategy?.gpu_index:''}
+          &nbsp;•&nbsp; <strong>Compute:</strong> ${d.strategy?.compute_type}
+          &nbsp;•&nbsp; <strong>Chunk:</strong> ${d.strategy?.chunk_size}
+          &nbsp;•&nbsp; <strong>Diar:</strong> ${d.strategy?.diar_device}
+          ${d.warnings && d.warnings.length ? '<br><em>'+d.warnings.join(' • ')+'</em>' : '' }
         `;
-
-        // download link
-        const blob = new Blob([text], {type:'text/plain'});
+        // buttons
+        const blob = new Blob([d.transcript||''], {type:'text/plain'});
         dl.href = URL.createObjectURL(blob);
         dl.style.display = 'inline-block';
         dl.textContent = 'Download transcript';
+        copyBtn.style.display = 'inline-block';
 
         show(ok,'Done.');
         chips.forEach(c=>c.classList.add('done'));
         retrySafe.style.display='none';
-      } catch(e){
-        setChip('transcribe','error');
-        show(err, e.message || 'Request failed.');
-      } finally{
-        finish();
+        es.close();
         go.disabled = false; retrySafe.disabled = false;
+      });
+
+      es.addEventListener('error', ()=>{
+        setChip('transcribe','error');
+        show(err, 'Stream error.');
+        es.close();
+        go.disabled = false; retrySafe.disabled = false;
+      });
+
+      function startSafe(url2){
+        clearAlerts();
+        setStage('transcribe','Transcribing (Safe Mode)…', 10);
+        const es2 = openSSE(url2);
+        es2.addEventListener('progress', (ev)=>{
+          const p = JSON.parse(ev.data);
+          if(p.stage === 'transcribing'){ setStage('transcribe', `Transcribing… ${p.pct!=null? p.pct+'%':''}`, p.pct||60); }
+          else if(p.stage === 'finalizing'){ setStage('finalize', 'Finalizing…', p.pct||98); }
+        });
+        es2.addEventListener('done', (ev)=>{
+          const d = JSON.parse(ev.data);
+          setStage('finalize','Done.',100);
+          out.textContent = d.transcript || '';
+          out.style.display='block';
+          // buttons
+          const blob = new Blob([d.transcript||''], {type:'text/plain'});
+          dl.href = URL.createObjectURL(blob);
+          dl.style.display = 'inline-block';
+          dl.textContent = 'Download transcript';
+          copyBtn.style.display = 'inline-block';
+
+          show(ok,'Done.');
+          chips.forEach(c=>c.classList.add('done'));
+          es2.close();
+          go.disabled = false; retrySafe.disabled = false;
+        });
+        es2.addEventListener('error', ()=>{ show(err, 'Stream error.'); es2.close(); go.disabled=false; });
       }
     }
 
-    document.getElementById('go').addEventListener('click', ()=> run(false));
+    document.getElementById('go').addEventListener('click', start);
   </script>
 </body>
 </html>
