@@ -3,7 +3,7 @@
 import argparse
 from transcriber import transcribe_url
 
-def do_something_with(transcript: str):
+def handle_text(transcript: str):
     """
     Replace this with whatever you need to do with the text:
     - save to a DB
@@ -37,7 +37,7 @@ def main():
     )
 
     # 2) do whatever you like with the transcript
-    do_something_with(text)
+    handle_text(text)
 
     if args.keep_files:
         print("Session files kept in:", session)

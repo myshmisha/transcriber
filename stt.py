@@ -110,7 +110,7 @@ if __name__ == "__main__":
     start_time = time.time()
     
     # ─── CONFIG ────────────────────────────────────────────────────────────────
-    input_name    = "2025-07-28"
+    input_name    = ""
     ext           = "opus"
     num_speakers  = None
 
