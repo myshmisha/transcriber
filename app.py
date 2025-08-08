@@ -1,23 +1,12 @@
 import argparse
-import json
-import threading
-import queue
-import time
 from typing import Optional
 
-from flask import (
-    Flask,
-    request,
-    jsonify,
-    render_template,
-    Response,
-    stream_with_context,
-)
+from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
 
 from config import load_settings, Settings
 from stt_service import STTService, BusyError, OOMError
-from transcriber import transcribe_url, run_stream_job
+from transcriber import transcribe_url
 
 
 def create_app(config_path: Optional[str] = None) -> Flask:
@@ -32,7 +21,6 @@ def create_app(config_path: Optional[str] = None) -> Flask:
     def index():
         return render_template("index.html")
 
-    # ---- existing JSON POST (kept) ----
     @app.post("/transcribe")
     def transcribe():
         data = request.get_json(force=True) or {}
@@ -75,127 +63,6 @@ def create_app(config_path: Optional[str] = None) -> Flask:
         except Exception as e:
             app.logger.exception("Transcription failed")
             return jsonify(error_code="SERVER_ERROR", message=str(e)), 500
-
-    # ---- NEW: SSE streaming endpoint (hardened) ----
-    @app.route("/transcribe/stream", methods=["GET", "OPTIONS"])
-    def transcribe_stream():
-        if request.method == "OPTIONS":
-            # CORS preflight for some hosts/proxies
-            return (
-                "",
-                204,
-                {
-                    "Access-Control-Allow-Origin": "*",
-                    "Access-Control-Allow-Methods": "GET, OPTIONS",
-                    "Access-Control-Allow-Headers": "Content-Type",
-                },
-            )
-
-        args = request.args or {}
-        url = args.get("youtube_url")
-        if not url:
-            return "missing youtube_url", 400
-
-        lang = args.get("language", "en")
-        chunk_size = int(args.get("chunk_size", 30))
-        safe_mode = args.get("safe_mode", "0") in ("1", "true", "True", "yes")
-        num_speakers = int(args["num_speakers"]) if args.get("num_speakers") else None
-        hf_token = args.get("hf_token")
-
-        svc: STTService = app.config["_STT_SERVICE"]
-        cfg: Settings = app.config["_SETTINGS"]
-
-        q: "queue.Queue[dict]" = queue.Queue()
-
-        def emit(ev_type: str, payload: dict):
-            q.put({"type": ev_type, "payload": payload})
-
-        def job():
-            try:
-                run_stream_job(
-                    url=url,
-                    lang=lang,
-                    chunk_size=chunk_size,
-                    num_speakers=num_speakers,
-                    hf_token=hf_token,
-                    safe_mode=safe_mode,
-                    service=svc,
-                    settings=cfg,
-                    emit=emit,
-                )
-            except BusyError as e:
-                emit(
-                    "advise",
-                    {"error_code": "BUSY", "message": "Transcriber busy.", "retry_after": e.retry_after},
-                )
-            except OOMError as e:
-                emit(
-                    "advise",
-                    {"error_code": "OOM", "message": "GPU OOM.", "suggestion": e.suggestion},
-                )
-            except Exception as e:
-                app.logger.exception("stream job failed")
-                # IMPORTANT: do not use event name "error" (reserved by browsers)
-                emit("server_error", {"message": str(e)})
-            finally:
-                q.put({"type": "__end__", "payload": {}})
-
-        threading.Thread(target=job, daemon=True).start()
-
-        def sse(event: str, data_obj: dict) -> str:
-            return f"event: {event}\n" + "data: " + json.dumps(data_obj, ensure_ascii=False) + "\n\n"
-
-        @stream_with_context
-        def gen():
-            # kick bytes immediately so proxies keep the pipe open
-            yield ":\n\n"  # SSE heartbeat
-            yield sse("progress", {"stage": "queue", "pct": 1.0})
-            last_ping = time.time()
-
-            while True:
-                try:
-                    ev = q.get(timeout=10)
-                    if ev["type"] == "__end__":
-                        break
-                    yield sse(ev["type"], ev["payload"])
-                except queue.Empty:
-                    # heartbeat to avoid idle closes
-                    yield ":\n\n"
-                if time.time() - last_ping > 25:
-                    yield ":\n\n"
-                    last_ping = time.time()
-
-        headers = {
-            "Cache-Control": "no-cache, no-transform",
-            "Connection": "keep-alive",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type",
-            "X-Accel-Buffering": "no",  # disable nginx buffering if any
-        }
-        return Response(gen(), headers=headers, mimetype="text/event-stream")
-
-    # ---- NEW: simple SSE test endpoint ----
-    @app.get("/_sse_test")
-    def sse_test():
-        def sse(event, data):
-            return f"event: {event}\n" + "data: " + json.dumps(data) + "\n\n"
-
-        @stream_with_context
-        def gen():
-            yield ":\n\n"
-            for i in range(1, 31):
-                yield sse("progress", {"stage": "test", "pct": round(i / 30 * 100, 1)})
-                time.sleep(1)
-            yield sse("done", {"ok": True})
-
-        headers = {
-            "Cache-Control": "no-cache, no-transform",
-            "Connection": "keep-alive",
-            "Access-Control-Allow-Origin": "*",
-            "X-Accel-Buffering": "no",
-        }
-        return Response(gen(), headers=headers, mimetype="text/event-stream")
 
     @app.get("/healthz")
     def healthz():

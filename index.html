@@ -140,7 +140,7 @@
     const API_BASE = location.hostname.endsWith('github.io')
       ? 'https://fair-joint-dinosaur.ngrok-free.app'
       : '';
-    const STREAM_URL = API_BASE + '/transcribe/stream';
+    const API_URL = API_BASE + '/transcribe';
     const HEALTH_URL = API_BASE + '/healthz';
 
     // Themes (soft)
@@ -223,35 +223,6 @@
     }
     health();
 
-    // SSE with retry (3 attempts)
-    function openSSEWithRetry(url, handlers) {
-      let tries = 0, es;
-      const connect = () => {
-        const sid = Date.now();
-        es = new EventSource(url + (url.includes('?') ? '&' : '?') + 'sid=' + sid);
-        es.addEventListener('progress', e => handlers.onProgress(JSON.parse(e.data)));
-        es.addEventListener('advise',   e => handlers.onAdvise(JSON.parse(e.data)));
-        es.addEventListener('server_error', e => {
-          const d = JSON.parse(e.data || '{}');
-          handlers.onServerError(d);
-          es.close();
-        });
-        es.addEventListener('done',     e => { handlers.onDone(JSON.parse(e.data)); es.close(); });
-        es.addEventListener('error',    () => {
-          es.close(); tries += 1;
-          if (tries <= 3) {
-            note.style.display='block';
-            note.textContent = `Connection hiccup… retrying (${tries}/3)…`;
-            setTimeout(connect, [800,1500,3000][tries-1]);
-          } else {
-            handlers.onHardError();
-          }
-        });
-      };
-      connect();
-      return { close: ()=> es && es.close() };
-    }
-
     // Copy helper
     async function copyTranscript(){
       try{
@@ -272,113 +243,82 @@
     }
     copyBtn.addEventListener('click', copyTranscript);
 
-    function start() {
+    async function run(safe=false, overrideChunk=null){
       clearAlerts();
       out.style.display='none'; dl.style.display='none'; copyBtn.style.display='none'; meta.style.display='none';
-      go.disabled = true; retrySafe.disabled = true;
 
       chips.forEach(c=>c.classList.remove('active','done','error'));
-      setStage('queue','Queued…', 1);
+      setStage('queue','Queued…', 5);
 
       const url = (urlI.value||'').trim();
-      if(!/^https?:\/\//.test(url)){ show(err,'Please enter a valid YouTube URL (http/https).'); go.disabled=false; return; }
+      if(!/^https?:\/\//.test(url)){ show(err,'Please enter a valid YouTube URL (http/https).'); return; }
       const lang = langI.value;
-      const chunk = Number(chunkI.value || 30);
+      const chunk = Number(overrideChunk ?? (chunkI.value || 30));
 
-      const qs = new URLSearchParams({ youtube_url:url, language:lang, chunk_size:String(chunk), safe_mode:'0' }).toString();
-      const stream = openSSEWithRetry(`${STREAM_URL}?${qs}`, {
-        onProgress: (p)=>{
-          if(p.stage === 'downloading'){ setStage('download', `Downloading… ${p.pct!=null? p.pct+'%':''} ${p.note? '• '+p.note:''}`, p.pct||10); }
-          else if(p.stage === 'transcribing'){ setStage('transcribe', `Transcribing… ${p.pct!=null? p.pct+'%':''}`, p.pct||80); }
-          else if(p.stage === 'finalizing'){ setStage('finalize', 'Finalizing…', p.pct||98); }
-        },
-        onAdvise: (a)=>{
-          if(a.error_code === 'OOM'){
+      // Simulated stages (since we killed SSE)
+      setStage('download','Downloading…', 25);
+
+      try{
+        const res = await fetch(API_URL, {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({
+            youtube_url: url,
+            language: lang,
+            chunk_size: chunk,
+            safe_mode: safe
+          })
+        });
+
+        const ct = res.headers.get('content-type') || '';
+        const payload = ct.includes('application/json') ? await res.json() : { error_code:'SERVER_ERROR', message: await res.text() };
+
+        if(!res.ok){
+          if(payload && payload.error_code==='OOM'){
             setChip('transcribe','error');
-            show(err, (a.suggestion && a.suggestion.message) || 'GPU OOM.');
+            show(err, (payload.suggestion && payload.suggestion.message) || 'GPU OOM.');
             retrySafe.style.display='inline-block';
-            const nextChunk = (a.suggestion && a.suggestion.suggested_chunk_size) || Math.max(10, Math.floor(chunk/2));
-            retrySafe.onclick = ()=>{
-              stream.close();
-              const qs2 = new URLSearchParams({ youtube_url:url, language:lang, chunk_size:String(nextChunk), safe_mode:'1' }).toString();
-              startSafe(`${STREAM_URL}?${qs2}`);
-            };
-          } else if (a.error_code === 'BUSY'){
-            setStage('queue', `Server busy — retrying in ${a.retry_after||2}s…`, 5);
-            setTimeout(()=>{ stream.close(); start(); }, (a.retry_after||2)*1000);
+            const nextChunk = (payload.suggestion && payload.suggestion.suggested_chunk_size) || Math.max(10, Math.floor(chunk/2));
+            retrySafe.onclick = ()=> run(true, nextChunk);
+            return;
           }
-        },
-        onServerError: (d)=>{
-          setChip('transcribe','error');
-          show(err, d.message || 'Server error.');
-          go.disabled = false; retrySafe.disabled = false;
-        },
-        onDone: (d)=>{
-          setStage('finalize','Done.',100);
-          out.textContent = d.transcript || '';
-          out.style.display='block';
-          meta.style.display='block';
-          meta.innerHTML = `
-            <strong>Device:</strong> ${d.strategy?.device}${d.strategy?.gpu_index!=null?' #'+d.strategy?.gpu_index:''}
-            &nbsp;•&nbsp; <strong>Compute:</strong> ${d.strategy?.compute_type}
-            &nbsp;•&nbsp; <strong>Chunk:</strong> ${d.strategy?.chunk_size}
-            &nbsp;•&nbsp; <strong>Diar:</strong> ${d.strategy?.diar_device}
-            ${d.warnings && d.warnings.length ? '<br><em>'+d.warnings.join(' • ')+'</em>' : '' }
-          `;
-          const blob = new Blob([d.transcript||''], {type:'text/plain'});
-          dl.href = URL.createObjectURL(blob);
-          dl.style.display = 'inline-block';
-          dl.textContent = 'Download transcript';
-          copyBtn.style.display = 'inline-block';
-          show(ok,'Done.');
-          chips.forEach(c=>c.classList.add('done'));
-          retrySafe.style.display='none';
-          go.disabled = false; retrySafe.disabled = false;
-        },
-        onHardError: ()=>{
-          setChip('transcribe','error');
-          show(err, 'Stream error.');
-          go.disabled = false; retrySafe.disabled = false;
+          if(payload && payload.error_code==='BUSY'){
+            setStage('queue', `Server busy — retry again in ${payload.retry_after||2}s`, 10);
+            show(note, `Server busy. Please retry shortly.`);
+            return;
+          }
+          show(err, payload.message || 'Server error.');
+          return;
         }
-      });
+
+        setStage('transcribe','Transcribing…', 75);
+        setStage('finalize','Finalizing…', 98);
+
+        const text = payload.transcript || '';
+        out.textContent = text; out.style.display='block';
+        meta.style.display='block';
+        meta.innerHTML = `
+          <strong>Device:</strong> ${payload.strategy?.device}${payload.strategy?.gpu_index!=null?' #'+payload.strategy?.gpu_index:''}
+          &nbsp;•&nbsp; <strong>Compute:</strong> ${payload.strategy?.compute_type}
+          &nbsp;•&nbsp; <strong>Chunk:</strong> ${payload.strategy?.chunk_size}
+          &nbsp;•&nbsp; <strong>Diar:</strong> ${payload.strategy?.diar_device}
+          ${payload.warnings && payload.warnings.length ? '<br><em>'+payload.warnings.join(' • ')+'</em>' : '' }
+        `;
+        const blob = new Blob([text], {type:'text/plain'});
+        dl.href = URL.createObjectURL(blob);
+        dl.style.display = 'inline-block';
+        dl.textContent = 'Download transcript';
+        copyBtn.style.display = 'inline-block';
+
+        show(ok,'Done.');
+        chips.forEach(c=>c.classList.add('done'));
+
+      } catch(e){
+        show(err, e.message || 'Request failed.');
+      }
     }
 
-    function startSafe(url2){
-      clearAlerts();
-      setStage('transcribe','Transcribing (Safe Mode)…', 10);
-      const s2 = openSSEWithRetry(url2, {
-        onProgress: (p)=>{
-          if(p.stage === 'transcribing'){ setStage('transcribe', `Transcribing… ${p.pct!=null? p.pct+'%':''}`, p.pct||60); }
-          else if(p.stage === 'finalizing'){ setStage('finalize', 'Finalizing…', p.pct||98); }
-        },
-        onAdvise: ()=>{},
-        onServerError: (d)=>{
-          setChip('transcribe','error');
-          show(err, d.message || 'Server error.');
-          go.disabled = false; retrySafe.disabled = false;
-        },
-        onDone: (d)=>{
-          setStage('finalize','Done.',100);
-          out.textContent = d.transcript || '';
-          out.style.display='block';
-          const blob = new Blob([d.transcript||''], {type:'text/plain'});
-          dl.href = URL.createObjectURL(blob);
-          dl.style.display = 'inline-block';
-          dl.textContent = 'Download transcript';
-          copyBtn.style.display = 'inline-block';
-          show(ok,'Done.');
-          chips.forEach(c=>c.classList.add('done'));
-          go.disabled = false; retrySafe.disabled = false;
-        },
-        onHardError: ()=>{
-          setChip('transcribe','error');
-          show(err, 'Stream error.');
-          go.disabled = false;
-        }
-      });
-    }
-
-    document.getElementById('go').addEventListener('click', start);
+    document.getElementById('go').addEventListener('click', ()=> run(false));
   </script>
 </body>
 </html>
