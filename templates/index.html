@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>YouTube Transcription</title>
+  <link rel="stylesheet" href="/static/css/styles.css"/>
+</head>
+<body>
+  <div class="container">
+    <h1>YouTube Transcription Tool</h1>
+
+    <div id="status" class="alert" style="display:none"></div>
+
+    <label for="youtube-url">Enter YouTube Video URL:</label>
+    <input type="text" id="youtube-url" placeholder="https://youtu.be/..." required>
+
+    <div class="row">
+      <div class="col">
+        <label for="language">Select Language:</label>
+        <select id="language">
+          <option value="en" selected>English</option>
+          <option value="ar">Arabic</option>
+          <option value="fr">French</option>
+          <option value="es">Spanish</option>
+          <option value="de">German</option>
+        </select>
+      </div>
+      <div class="col">
+        <label for="chunk">Chunk Size (sec):</label>
+        <input type="number" id="chunk" min="5" max="120" value="30"/>
+      </div>
+    </div>
+
+    <button class="button" id="transcribe-btn">Generate Transcript</button>
+    <button class="button button--ghost" id="retry-safe" style="display:none">Retry with Safe Mode</button>
+
+    <div class="loading-message" id="loading-message" style="display:none">Generating transcript…</div>
+
+    <div id="meta" class="meta" style="display:none"></div>
+
+    <div class="transcript-box" id="transcript-box" style="display:none"></div>
+    <a id="download-link" class="button" style="display:none; margin-top:10px;"></a>
+  </div>
+
+  <script>
+    // Same-origin API:
+    const API_URL = '/transcribe';
+  </script>
+  <script src="/static/js/app.js"></script>
+</body>
+</html>

@@ -1,44 +1,73 @@
-# transcriber.py
+import os
+import shutil
+import uuid
+import tempfile
+from datetime import datetime
+from typing import Tuple, Dict, Any, Optional, List
 
-import os, subprocess, datetime, shutil
-from stt import stt
+from yt_dlp import YoutubeDL
+from stt_service import STTService
+from config import Settings, load_settings
 
-BASE_DIR = os.path.dirname(os.path.realpath(__file__))
-SESSIONS = os.path.join(BASE_DIR, "sessions")
-# os.makedirs(SESSIONS, exist_ok=True)
+SESSIONS_ROOT = os.path.join(os.path.dirname(__file__), "sessions")
+os.makedirs(SESSIONS_ROOT, exist_ok=True)
 
-def download_audio(youtube_url, out_path, fmt="wav"):
-    cmd = [
-        "yt-dlp","-x",
-        f"--audio-format={fmt}",
-        "--no-cache-dir",
-        "-o", f"{out_path}.%(ext)s",
-        youtube_url
-    ]
-    subprocess.run(cmd, check=True)
-    return f"{out_path}.{fmt}"
+def _new_session_dir() -> str:
+    stamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    sid = f"{stamp}-{uuid.uuid4().hex[:8]}"
+    path = os.path.join(SESSIONS_ROOT, sid)
+    os.makedirs(path, exist_ok=True)
+    return path
 
-def transcribe_url(youtube_url, lang=None, chunk_size=15, keep_files=False, debug_print=False):
-    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
-    session_dir = os.path.join(SESSIONS, ts)
-    os.makedirs(session_dir)
+def _download_youtube_audio(url: str, out_dir: str, debug_print: bool = False) -> str:
+    opts = {
+        "format": "bestaudio/best",
+        "outtmpl": os.path.join(out_dir, "%(title).200s.%(ext)s"),
+        "noprogress": not debug_print,
+        "quiet": not debug_print,
+        "nocheckcertificate": True,
+    }
+    with YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+        if "requested_downloads" in info and info["requested_downloads"]:
+            return info["requested_downloads"][0]["filepath"]
+        title = info.get("title", "audio")
+        ext = info.get("ext", "m4a")
+        return os.path.join(out_dir, f"{title}.{ext}")
+
+def transcribe_url(
+    url: str,
+    *,
+    lang: Optional[str] = None,
+    chunk_size: int = 15,
+    keep_files: bool = False,
+    debug_print: bool = False,
+    num_speakers: Optional[int] = None,
+    hf_token: Optional[str] = None,
+    service: Optional[STTService] = None,
+    settings: Optional[Settings] = None,
+    safe_mode: bool = False,
+) -> Tuple[str, Optional[str], Dict[str, Any], list[str]]:
+    session_dir = _new_session_dir() if keep_files else tempfile.mkdtemp(prefix="stt_")
+    audio_path = _download_youtube_audio(url, session_dir, debug_print=debug_print)
+
+    svc = service or STTService(settings or load_settings())
+
     try:
-        if debug_print:
-            print(f"[{ts}] Downloading…")
-        audio = download_audio(youtube_url, os.path.join(session_dir, "audio"), fmt="wav")
-
-        if debug_print:
-            print(f"[{ts}] Transcribing…")
-        _ = stt(audio, num_speakers=None, save_file=True, LANG=lang,
-                chunk_size=chunk_size)
-
-        txt_path = os.path.join(session_dir, "audio_transcript.txt")
-        with open(txt_path, "r", encoding="utf-8") as f:
-            text = f.read()
-        return text, session_dir
-
-    finally:
-        if not keep_files:
-            if debug_print:
-                print(f"[{ts}] Cleaning up…")
+        text, strategy, warnings = svc.transcribe(
+            audio_path,
+            lang=lang,
+            chunk_size=chunk_size,
+            num_speakers=num_speakers,
+            hf_token=hf_token,
+            safe_mode=safe_mode,
+        )
+        if keep_files:
+            return text, session_dir, strategy, warnings
+        else:
             shutil.rmtree(session_dir, ignore_errors=True)
+            return text, None, strategy, warnings
+    except Exception:
+        if not keep_files:
+            shutil.rmtree(session_dir, ignore_errors=True)
+        raise

@@ -1,0 +1,13 @@
+model_size: large
+max_concurrency: 1
+cache_dir: ./hf_cache
+
+# behavior
+allow_cpu_fallback: true         # let Safe Mode fall back to CPU if GPU still OOMs
+acquire_timeout_seconds: 2       # how long to wait for a free slot before BUSY
+safe_chunk_size: 10              # Safe Mode max chunk size
+
+gpu:
+  policy: best                   # best | fixed | cpu
+  id: null                       # used only if policy: fixed
+  exclude: []                    # never use these IDs
