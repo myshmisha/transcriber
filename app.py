@@ -8,7 +8,7 @@ from typing import Optional
 from flask import Flask, request, jsonify, render_template, session
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
-from jinja2 import ChoiceLoader, FileSystemLoader  # <-- add this
+from jinja2 import ChoiceLoader, FileSystemLoader
 
 from config import load_settings, Settings
 from stt_service import STTService, BusyError, OOMError
@@ -28,50 +28,76 @@ def allowed_file(filename: str) -> bool:
 def create_app(config_path: Optional[str] = None) -> Flask:
     settings: Settings = load_settings(config_path)
 
-    # Resolve folders relative to this file (works no matter your CWD)
+    # Paths (support index.html in root and login.html in templates/)
     BASE_DIR = Path(__file__).resolve().parent
-    TEMPLATE_ROOT = BASE_DIR            # project root (so index.html in root works)
-    TEMPLATE_FALLBACK = BASE_DIR / "templates"  # optional templates folder
+    TEMPLATE_ROOT = BASE_DIR
+    TEMPLATE_FALLBACK = BASE_DIR / "templates"
     STATIC_DIR = BASE_DIR / "static"
 
     app = Flask(
         __name__,
         static_folder=str(STATIC_DIR),
-        template_folder=str(TEMPLATE_ROOT),  # primary: root
+        template_folder=str(TEMPLATE_ROOT),  # root first
     )
-
-    # Also search /templates if present
     app.jinja_loader = ChoiceLoader([
         FileSystemLoader(str(TEMPLATE_ROOT)),
         FileSystemLoader(str(TEMPLATE_FALLBACK)),
     ])
 
-    # Sessions (set SECRET_KEY in prod)
+    # ---- Sessions / cookies (cross-site friendly for GH Pages) ----
     app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "change-me-please")
-    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-    app.config["SESSION_COOKIE_SECURE"] = False  # set True if strictly HTTPS
+    # For GH Pages (different origin), cookies must be cross-site:
+    app.config["SESSION_COOKIE_SAMESITE"] = "None"
+    app.config["SESSION_COOKIE_SECURE"] = True  # ngrok is HTTPS; keep True in prod
 
     # Optional upload limit (default 2GB)
     app.config["MAX_CONTENT_LENGTH"] = int(os.environ.get("MAX_CONTENT_LENGTH_BYTES", 2 * 1024 * 1024 * 1024))
 
-    CORS(app, origins="*")
+    # ---- CORS (allow GH Pages origin, include credentials) ----
+    gh_pages_origin = os.environ.get("GH_PAGES_ORIGIN", "https://myshmisha.github.io")
+    extra_dev = [
+        "http://localhost:3000",
+        "http://127.0.0.1:5500",
+        "http://localhost:5500",
+    ]
+    CORS(
+        app,
+        origins=[gh_pages_origin, *extra_dev],
+        supports_credentials=True,
+        expose_headers=["Content-Type"],
+        allow_headers=["Content-Type"],
+    )
 
+    # App state
     app.config["_SETTINGS"] = settings
     app.config["_STT_SERVICE"] = STTService(settings)
 
     def authed() -> bool:
         return bool(session.get("authed"))
 
+    # ---------------- Views ----------------
+
     @app.get("/")
     def index():
+        # If serving the UI from Flask (same-origin), use server-side gating.
         if not authed():
-            # Will find login.html in root or /templates thanks to ChoiceLoader
             return render_template("login.html")
         theme = session.get("theme", "light")
         greeting = session.get("greeting", "Hello")
-        show_greet = bool(session.pop("show_greet", False))  # once after login
-        # Will find index.html in root (or /templates)
+        show_greet = bool(session.pop("show_greet", False))
         return render_template("index.html", theme=theme, greeting=greeting, show_greet=show_greet)
+
+    # ----- Auth API (used by GH Pages client-side login) -----
+
+    @app.get("/auth/check")
+    def auth_check():
+        if authed():
+            return jsonify(
+                authed=True,
+                theme=session.get("theme", "light"),
+                greeting=session.get("greeting", "Hello"),
+            ), 200
+        return jsonify(authed=False), 200
 
     @app.post("/auth/login")
     def auth_login():
@@ -84,14 +110,15 @@ def create_app(config_path: Optional[str] = None) -> Flask:
         session["theme"] = info["theme"]
         session["greeting"] = info["greeting"]
         session["show_greet"] = True
-        return jsonify(ok=True)
+        return jsonify(ok=True), 200
 
     @app.post("/auth/logout")
     def auth_logout():
         session.clear()
-        return jsonify(ok=True)
+        return jsonify(ok=True), 200
 
-    # -------- URL transcription --------
+    # ----- Transcribe by URL -----
+
     @app.post("/transcribe")
     def transcribe():
         if not authed():
@@ -128,7 +155,8 @@ def create_app(config_path: Optional[str] = None) -> Flask:
             app.logger.exception("Transcription failed")
             return jsonify(error_code="SERVER_ERROR", message=str(e)), 500
 
-    # -------- File transcription --------
+    # ----- Transcribe by File -----
+
     @app.post("/transcribe_file")
     def transcribe_file():
         if not authed():

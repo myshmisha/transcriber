@@ -6,7 +6,7 @@
   <title>YouTube Transcription</title>
   <style>
     :root{
-      --bg:#f7f7fb; --card:#ffffff; --text:#1f2030; --muted:#6a5b6f;
+      --bg:#fff; --card:#ffffff; --text:#1f2030; --muted:#5c6473;
       --accent:#4c7dff; --accent-2:#3dd6a5; --danger:#c0392b;
       --border:rgba(0,0,0,.12);
       --input-bg:#ffffff; --input-text:#1f2030;
@@ -14,11 +14,11 @@
       --drop-bg:#fcfcff; --drop-border:#cfd6ef;
     }
     *{box-sizing:border-box}
-    body{margin:0; font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; background:var(--bg);}
+    body{margin:0; font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; background:var(--bg); color:var(--text);}
     .wrap{max-width:980px;margin:40px auto;padding:0 16px}
-    .card{background:var(--card); border:1px solid var(--border); border-radius:16px; box-shadow:0 10px 30px rgba(0,0,0,.08); overflow:hidden;}
+    .card{background:var(--card); border:1px solid var(--border); border-radius:16px; box-shadow:0 10px 30px rgba(0,0,0,.06); overflow:hidden;}
     .head{padding:22px 24px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; gap:12px}
-    .title{color:var(--text); font-weight:700; font-size:20px;}
+    .title{font-weight:700; font-size:20px;}
     .badge{padding:4px 10px; border-radius:999px; font-size:12px; border:1px solid var(--border); color:var(--muted)}
     .body{padding:24px}
     label{display:block; color:var(--muted); font-size:13px; margin:10px 0 6px}
@@ -31,8 +31,9 @@
     @media (min-width:880px){ .grid{grid-template-columns: 1.6fr .7fr .7fr} }
     .row{display:flex; gap:12px; align-items:center; flex-wrap:wrap}
     .btn{appearance:none; border:0; padding:12px 14px; border-radius:10px; cursor:pointer; font-weight:600; letter-spacing:.2px; transition:.15s}
-    .btn-primary{background:var(--accent); color:white}
+    .btn-primary{background:var(--accent); color:#fff}
     .btn-ghost{background:transparent; color:var(--accent); border:1px solid var(--accent)}
+    .btn-danger{background:var(--danger); color:#fff}
     .btn:disabled{opacity:.6; cursor:not-allowed}
     .status{display:flex; gap:8px; flex-wrap:wrap; margin:10px 0 14px}
     .chip{display:inline-flex; align-items:center; gap:8px; padding:8px 12px; border-radius:999px; border:1px solid var(--border); color:var(--muted); font-size:12px; background:#fff}
@@ -53,22 +54,43 @@
     .alert.error{background:#ffe9e9; color:#a73a3a; border-color:#f3c2c2}
     .footer{display:flex; gap:10px; margin-top:14px; justify-content:flex-end;}
     a.dl{display:none; text-decoration:none}
-    .toast{position:fixed; top:12px; left:50%; transform:translateX(-50%); background:#fff; border:1px solid var(--border); border-radius:10px; padding:10px 14px; color:var(--text); box-shadow:0 8px 24px rgba(0,0,0,.08); display:none; z-index:1000}
 
-    .drop{ margin-top:16px; padding:16px; border:2px dashed var(--drop-border); background:var(--drop-bg); border-radius:14px; color:#48506a;
-      display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+    /* Segmented toggle */
+    .seg{display:inline-flex; border:1px solid var(--border); border-radius:10px; overflow:hidden; background:#fff}
+    .seg button{border:0; padding:10px 14px; cursor:pointer; background:transparent; color:#4a5670; font-weight:600}
+    .seg button.active{background:var(--accent); color:#fff}
+
+    /* Drop zone */
+    .drop{
+      margin-top:16px; padding:16px; border:2px dashed var(--drop-border);
+      background:var(--drop-bg); border-radius:14px; color:#48506a;
+      display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
+    }
     .drop.highlight{ background:#f8fbff; border-color:var(--accent); }
     .file-pill{display:none; padding:6px 10px; border-radius:999px; background:#f1f4ff; border:1px solid var(--border); color:#2b3e86; font-size:12px}
+    .file-pill a{margin-left:8px; color:#a23; text-decoration:none; font-weight:700}
     #fileInput{display:none}
+
+    /* Login overlay for GH Pages */
+    .overlay{position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,.2); z-index:9999}
+    .login{width:min(92vw,420px); background:#fff; border:1px solid var(--border); border-radius:16px; box-shadow:0 10px 30px rgba(0,0,0,.08); padding:24px;}
+    .login h2{margin:0 0 8px}
+    .login .msg{margin-top:10px; font-size:13px; color:#b52424; display:none}
   </style>
 </head>
-
-<body
-  data-theme="{{ theme }}"
-  data-show-greet="{{ '1' if show_greet else '0' }}"
-  data-greeting="{{ greeting }}"
->
-  <div class="toast" id="greet"></div>
+<body>
+  <!-- Client login (for GH Pages) -->
+  <div class="overlay" id="loginOverlay">
+    <div class="login">
+      <h2>Sign in</h2>
+      <p>Enter password to continue</p>
+      <input id="pw" type="password" placeholder="Password"/>
+      <div class="row" style="margin-top:12px; justify-content:flex-end">
+        <button class="btn btn-primary" id="enter">Enter</button>
+      </div>
+      <div class="msg" id="loginErr"></div>
+    </div>
+  </div>
 
   <div class="wrap">
     <div class="card">
@@ -77,39 +99,72 @@
         <div class="badge" id="gpuMeta">GPU: —</div>
       </div>
       <div class="body">
-        <div class="grid">
-          <div>
-            <label for="youtube-url">YouTube URL</label>
-            <input id="youtube-url" type="text" placeholder="https://youtu.be/…">
+        <!-- Mode toggle -->
+        <div class="row" style="justify-content:space-between; align-items:center">
+          <div class="seg">
+            <button id="modeUrl" class="active" type="button">YouTube URL</button>
+            <button id="modeFile" type="button">Upload File</button>
           </div>
-          <div>
-            <label for="language">Language</label>
-            <select id="language">
-              <option value="en" selected>English</option>
-              <option value="ar">Arabic</option>
-              <option value="fr">French</option>
-              <option value="es">Spanish</option>
-              <option value="de">German</option>
-            </select>
-          </div>
-          <div>
-            <label for="chunk">Chunk (sec)</label>
-            <input id="chunk" type="number" min="5" max="120" value="30">
+          <div style="color:var(--muted); font-size:12px">Choose one mode</div>
+        </div>
+
+        <!-- URL mode -->
+        <div id="urlMode">
+          <div class="grid" style="margin-top:12px">
+            <div>
+              <label for="youtube-url">YouTube URL</label>
+              <input id="youtube-url" type="text" placeholder="https://youtu.be/…">
+            </div>
+            <div>
+              <label for="language">Language</label>
+              <select id="language">
+                <option value="en" selected>English</option>
+                <option value="ar">Arabic</option>
+                <option value="fr">French</option>
+                <option value="es">Spanish</option>
+                <option value="de">German</option>
+              </select>
+            </div>
+            <div>
+              <label for="chunk">Chunk (sec)</label>
+              <input id="chunk" type="number" min="5" max="120" value="30">
+            </div>
           </div>
         </div>
 
-        <div class="drop" id="drop">
-          <button class="btn btn-ghost" id="pickBtn" type="button">Choose file</button>
-          <span class="file-pill" id="filePill"></span>
-          <input type="file" id="fileInput" accept=".mp3,.wav,.m4a,.mp4,.mkv,.webm,.mov,.aac,.flac,.ogg,.opus,video/*,audio/*"/>
+        <!-- File mode -->
+        <div id="fileMode" style="display:none; margin-top:12px">
+          <div class="row">
+            <div>
+              <label>File</label>
+              <div class="drop" id="drop">
+                <button class="btn btn-ghost" id="pickBtn" type="button">Choose file</button>
+                <span class="file-pill" id="filePill"></span>
+                <input type="file" id="fileInput" accept=".mp3,.wav,.m4a,.mp4,.mkv,.webm,.mov,.aac,.flac,.ogg,.opus,video/*,audio/*"/>
+              </div>
+              <div class="help">Formats: mp3, wav, m4a, mp4, webm, mkv, mov, flac, ogg, opus</div>
+            </div>
+            <div style="min-width:220px">
+              <label for="languageF">Language</label>
+              <select id="languageF">
+                <option value="en" selected>English</option>
+                <option value="ar">Arabic</option>
+                <option value="fr">French</option>
+                <option value="es">Spanish</option>
+                <option value="de">German</option>
+              </select>
+              <label for="chunkF" style="margin-top:10px">Chunk (sec)</label>
+              <input id="chunkF" type="number" min="5" max="120" value="30">
+            </div>
+          </div>
         </div>
 
-        <div class="row" style="margin-top:12px">
+        <div class="row" style="margin-top:16px">
           <button class="btn btn-primary" id="go">Generate Transcript</button>
           <button class="btn btn-ghost" id="logout">Logout</button>
         </div>
 
-        <div class="status" id="statusChips">
+        <div class="status" id="statusChips" style="margin-top:10px">
           <span class="chip" data-step="queue"><span class="dot"></span> Queued</span>
           <span class="chip" data-step="download"><span class="dot"></span> Downloading</span>
           <span class="chip" data-step="transcribe"><span class="dot"></span> Transcribing</span>
@@ -133,15 +188,28 @@
   </div>
 
   <script>
-    const THEME = document.body.dataset.theme || 'light';
-    const SHOW_GREET = document.body.dataset.showGreet === '1';
-    const GREETING = document.body.dataset.greeting || '';
+    // === Configure your API base (ngrok) ===
+    // When hosted on GH Pages (cross-site), we must call the ngrok base directly:
+    const API_BASE = (location.hostname.endsWith('github.io'))
+      ? 'https://fair-joint-dinosaur.ngrok-free.app'   // <-- update when ngrok rotates
+      : '';
+
+    const EP = {
+      check:        API_BASE + '/auth/check',
+      login:        API_BASE + '/auth/login',
+      logout:       API_BASE + '/auth/logout',
+      transcribe:   API_BASE + '/transcribe',
+      transcribeF:  API_BASE + '/transcribe_file',
+      health:       API_BASE + '/healthz'
+    };
+
+    // --- Theme helpers (pink vs light) ---
     const THEMES = {
       pink:{bg:'#fff5fb',card:'#fff',text:'#1f2030',muted:'#6a5b6f',accent:'#e16bbd',accent2:'#ff9ecf',border:'rgba(0,0,0,.10)',inputBg:'#fff',inputText:'#1f2030',track:'#ffe6f3',barFrom:'#ff7fc7',barTo:'#ffb3dd'},
       light:{bg:'#fff',card:'#fff',text:'#1f2030',muted:'#5c6473',accent:'#4c7dff',accent2:'#3dd6a5',border:'rgba(0,0,0,.12)',inputBg:'#fff',inputText:'#1f2030',track:'#eef1f6',barFrom:'#4c7dff',barTo:'#8fb0ff'}
     };
-    (function theme(){
-      const t = THEMES[THEME] || THEMES.light, r = document.documentElement.style;
+    function applyTheme(name){
+      const t = THEMES[name] || THEMES.light, r = document.documentElement.style;
       r.setProperty('--bg', t.bg); r.setProperty('--card', t.card);
       r.setProperty('--text', t.text); r.setProperty('--muted', t.muted);
       r.setProperty('--accent', t.accent); r.setProperty('--accent-2', t.accent2);
@@ -149,86 +217,191 @@
       r.setProperty('--input-text', t.inputText); r.setProperty('--track', t.track);
       r.setProperty('--bar-from', t.barFrom); r.setProperty('--bar-to', t.barTo);
       document.body.style.background = t.bg;
-    })();
-    if (SHOW_GREET) { const g=document.getElementById('greet'); g.textContent = GREETING; g.style.display='block'; setTimeout(()=>{ g.style.display='none'; }, 1000); }
+    }
 
-    const API_URL_URL  = '/transcribe';
-    const API_URL_FILE = '/transcribe_file';
-    const HEALTH_URL   = '/healthz';
-
+    // --- UI refs ---
     const $ = id => document.getElementById(id);
+    const loginOverlay = $('loginOverlay'), loginErr = $('loginErr'), enterBtn = $('enter'), pw = $('pw');
     const go = $('go'), logoutBtn = $('logout');
+    const modeUrlBtn = $('modeUrl'), modeFileBtn = $('modeFile');
+    const urlMode = $('urlMode'), fileMode = $('fileMode');
     const urlI = $('youtube-url'), langI = $('language'), chunkI = $('chunk');
+    const langF = $('languageF'), chunkF = $('chunkF');
+    const drop = $('drop'), fileInput = $('fileInput'), pickBtn = $('pickBtn'), filePill = $('filePill');
     const chips = document.querySelectorAll('.chip');
     const bar = $('bar'), hint = $('hint');
     const note = $('note'), err = $('err'), ok = $('ok');
     const out = $('out'), dl = $('dl'), meta = $('meta'), gpuMeta = $('gpuMeta');
     const copyBtn = $('copyBtn');
 
-    const drop = $('drop'), fileInput = $('fileInput'), pickBtn = $('pickBtn'), filePill = $('filePill');
+    // --- State ---
     let pickedFile = null;
+    let authed = false;
 
+    // --- Mode switching ---
+    function activateUrlMode(){
+      modeUrlBtn.classList.add('active'); modeFileBtn.classList.remove('active');
+      urlMode.style.display = ''; fileMode.style.display = 'none';
+      // Clear file state when switching to URL
+      pickedFile = null; filePill.textContent=''; filePill.style.display='none'; fileInput.value='';
+    }
+    function activateFileMode(){
+      modeFileBtn.classList.add('active'); modeUrlBtn.classList.remove('active');
+      fileMode.style.display = ''; urlMode.style.display = 'none';
+      // Clear URL field when switching to File
+      urlI.value = '';
+    }
+    modeUrlBtn.addEventListener('click', activateUrlMode);
+    modeFileBtn.addEventListener('click', activateFileMode);
+
+    // --- Chips / progress ---
     function setChip(step, state){
       chips.forEach(c=>{ const s=c.getAttribute('data-step'); c.classList.remove('active','done','error'); if (s===step) c.classList.add(state); });
     }
-    function setStage(step,label,progress){ setChip(step,'active'); bar.style.width = (progress||0) + '%'; hint.textContent = label; }
+    function setStage(step,label,progress){ setChip(step,'active'); bar.style.width=(progress||0)+'%'; hint.textContent=label; }
     function clearAlerts(){ note.style.display=err.style.display=ok.style.display='none'; }
-    function show(a,msg){ a.textContent = msg; a.style.display='block'; }
+    function show(a,msg){ a.textContent=msg; a.style.display='block'; }
 
-    async function health(){ try{ const r=await fetch(HEALTH_URL,{cache:'no-store'}); if(!r.ok) return; const j=await r.json(); gpuMeta.textContent = `GPU: ${j.device}${j.gpu_index!==null?` #${j.gpu_index}`:''} • ${j.compute_type} • ${j.model_size}`; }catch{} }
-    health();
-
-    ['dragenter','dragover'].forEach(evt=> drop.addEventListener(evt, e=>{ e.preventDefault(); e.stopPropagation(); drop.classList.add('highlight'); }));
-    ['dragleave','drop'].forEach(evt=> drop.addEventListener(evt, e=>{ e.preventDefault(); e.stopPropagation(); drop.classList.remove('highlight'); }));
+    // --- Drag/drop + pick ---
+    ;['dragenter','dragover'].forEach(evt=> drop.addEventListener(evt, e=>{ e.preventDefault(); e.stopPropagation(); drop.classList.add('highlight'); }));
+    ;['dragleave','drop'].forEach(evt=> drop.addEventListener(evt, e=>{ e.preventDefault(); e.stopPropagation(); drop.classList.remove('highlight'); }));
     drop.addEventListener('drop', e=>{
-      const files = e.dataTransfer && e.dataTransfer.files; if (!files || !files.length) return;
-      pickedFile = files[0]; filePill.textContent = `${pickedFile.name} (${Math.round(pickedFile.size/1024/1024*10)/10} MB)`; filePill.style.display='inline-block';
+      const files = e.dataTransfer && e.dataTransfer.files; if(!files || !files.length) return;
+      pickedFile = files[0];
+      filePill.textContent = `${pickedFile.name} (${Math.round(pickedFile.size/1024/1024*10)/10} MB)`;
+      filePill.style.display = 'inline-block';
+      // Add clear action
+      filePill.innerHTML = `${filePill.textContent} <a href="#" id="clearFile">&times;</a>`;
+      document.getElementById('clearFile').onclick = (ev)=>{ ev.preventDefault(); pickedFile=null; filePill.style.display='none'; fileInput.value=''; };
     });
     pickBtn.addEventListener('click', ()=> fileInput.click());
-    fileInput.addEventListener('change', ()=>{ if (!fileInput.files || !fileInput.files.length) return; pickedFile = fileInput.files[0]; filePill.textContent = `${pickedFile.name} (${Math.round(pickedFile.size/1024/1024*10)/10} MB)`; filePill.style.display='inline-block'; });
+    fileInput.addEventListener('change', ()=>{
+      if(!fileInput.files || !fileInput.files.length) return;
+      pickedFile = fileInput.files[0];
+      filePill.textContent = `${pickedFile.name} (${Math.round(pickedFile.size/1024/1024*10)/10} MB)`;
+      filePill.style.display = 'inline-block';
+      filePill.innerHTML = `${filePill.textContent} <a href="#" id="clearFile">&times;</a>`;
+      document.getElementById('clearFile').onclick = (ev)=>{ ev.preventDefault(); pickedFile=null; filePill.style.display='none'; fileInput.value=''; };
+    });
 
+    // --- Copy transcript ---
     async function copyTranscript(){
       try{
-        const text = out.textContent || ''; if (!text) return;
-        if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); }
+        const text = out.textContent || ''; if(!text) return;
+        if(navigator.clipboard?.writeText) await navigator.clipboard.writeText(text);
         else { const ta=document.createElement('textarea'); ta.value=text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); }
         show(ok,'Copied to clipboard.'); setTimeout(()=> ok.style.display='none',1500);
-      } catch { show(err,'Copy failed.'); }
+      }catch{ show(err,'Copy failed.'); }
     }
     copyBtn.addEventListener('click', copyTranscript);
 
-    async function run(){
-      clearAlerts(); out.style.display='none'; dl.style.display='none'; copyBtn.style.display='none'; meta.style.display='none';
-      chips.forEach(c=>c.classList.remove('active','done','error')); setStage('queue','Queued…',5);
-
-      const lang = langI.value; const chunk = Number(chunkI.value || 30);
+    // --- Auth helpers (cross-site cookies require credentials: 'include') ---
+    async function checkAuth(){
       try{
-        let payload, okStatus = false, statusCode = 0;
+        const r = await fetch(EP.check, { credentials:'include' });
+        if(!r.ok) throw new Error('check failed');
+        const j = await r.json();
+        authed = !!j.authed;
+        if(authed){
+          applyTheme(j.theme || 'light');
+          // brief greet in title badge
+          gpuMeta.textContent = (j.greeting || 'Hello');
+          setTimeout(()=> health(), 800);
+          loginOverlay.style.display = 'none';
+        }else{
+          loginOverlay.style.display = 'flex';
+        }
+      }catch{
+        loginOverlay.style.display = 'flex';
+      }
+    }
 
-        if (pickedFile) {
-          setStage('download','Uploading file…',30);
-          const fd = new FormData(); fd.append('file', pickedFile); fd.append('language', lang); fd.append('chunk_size', String(chunk));
-          const res = await fetch(API_URL_FILE, { method:'POST', body: fd });
+    async function login(){
+      loginErr.style.display='none';
+      const password = (pw.value||'').trim();
+      if(!password){ loginErr.textContent='Please enter a password.'; loginErr.style.display='block'; return; }
+      try{
+        const r = await fetch(EP.login, {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          credentials:'include',
+          body: JSON.stringify({ password })
+        });
+        if(!r.ok){
+          const j = await r.json().catch(()=>({message:'Invalid password.'}));
+          loginErr.textContent = j.message || 'Invalid password.'; loginErr.style.display = 'block'; return;
+        }
+        await checkAuth();
+      }catch(e){
+        loginErr.textContent = 'Network error.'; loginErr.style.display = 'block';
+      }
+    }
+    enterBtn.addEventListener('click', login);
+    pw.addEventListener('keydown', e=>{ if(e.key==='Enter') login(); });
+
+    async function logout(){
+      try{ await fetch(EP.logout, { method:'POST', credentials:'include' }); }catch{}
+      authed = false; loginOverlay.style.display = 'flex';
+    }
+    logoutBtn.addEventListener('click', logout);
+
+    // --- Health ---
+    async function health(){
+      try{
+        const r = await fetch(EP.health, { credentials:'include', cache:'no-store' });
+        if(!r.ok) return;
+        const j = await r.json();
+        gpuMeta.textContent = `GPU: ${j.device}${j.gpu_index!==null?` #${j.gpu_index}`:''} • ${j.compute_type} • ${j.model_size}`;
+      }catch{}
+    }
+
+    // --- Run transcription based on active mode ---
+    async function run(){
+      if(!authed){ loginOverlay.style.display = 'flex'; return; }
+
+      clearAlerts();
+      out.style.display='none'; dl.style.display='none'; copyBtn.style.display='none'; meta.style.display='none';
+      chips.forEach(c=>c.classList.remove('active','done','error'));
+      setStage('queue','Queued…', 5);
+
+      try{
+        let payload, okStatus=false, statusCode=0;
+
+        if(modeFileBtn.classList.contains('active')){
+          // FILE MODE
+          if(!pickedFile){ show(err,'Choose a file first.'); return; }
+          const lang = langF.value, chunk = Number(chunkF.value||30);
+          setStage('download','Uploading file…', 30);
+          const fd = new FormData();
+          fd.append('file', pickedFile); fd.append('language', lang); fd.append('chunk_size', String(chunk));
+          const res = await fetch(EP.transcribeF, { method:'POST', body: fd, credentials:'include' });
           statusCode = res.status; okStatus = res.ok;
           payload = res.headers.get('content-type')?.includes('application/json') ? await res.json() : { message: await res.text() };
         } else {
+          // URL MODE
           const url = (urlI.value||'').trim();
-          if(!/^https?:\/\//.test(url)){ show(err,'Enter a valid YouTube URL (http/https) or choose a file.'); return; }
-          setStage('download','Downloading…',30);
-          const res = await fetch(API_URL_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ youtube_url:url, language:lang, chunk_size:chunk }) });
+          if(!/^https?:\/\//.test(url)){ show(err,'Enter a valid YouTube URL (http/https).'); return; }
+          const lang = langI.value, chunk = Number(chunkI.value||30);
+          setStage('download','Downloading…', 30);
+          const res = await fetch(EP.transcribe, {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            credentials:'include',
+            body: JSON.stringify({ youtube_url:url, language:lang, chunk_size:chunk })
+          });
           statusCode = res.status; okStatus = res.ok;
           payload = res.headers.get('content-type')?.includes('application/json') ? await res.json() : { message: await res.text() };
         }
 
         if(!okStatus){
-          if(statusCode === 401){ location.replace('/'); return; }
+          if(statusCode === 401){ loginOverlay.style.display='flex'; return; }
           if(payload && payload.error_code === 'OOM'){ setChip('transcribe','error'); show(err, (payload.suggestion && payload.suggestion.message) || 'GPU OOM.'); return; }
-          if(payload && payload.error_code === 'BUSY'){ setStage('queue', `Server busy — retry in ${payload.retry_after||2}s`, 10); show(note, `Server busy. Please retry shortly.`); return; }
+          if(payload && payload.error_code === 'BUSY'){ setStage('queue', `Server busy — retry later`, 10); show(note, `Server busy. Please retry shortly.`); return; }
           show(err, payload.message || payload.error || 'Server error.'); return;
         }
 
-        setStage('transcribe','Transcribing…',75);
-        setStage('finalize','Finalizing…',98);
+        setStage('transcribe','Transcribing…', 75);
+        setStage('finalize','Finalizing…', 98);
 
         const text = payload.transcript || '';
         out.textContent = text; out.style.display='block';
@@ -240,15 +413,20 @@
           &nbsp;•&nbsp; <strong>Diar:</strong> ${payload.strategy?.diar_device}
           ${payload.warnings && payload.warnings.length ? '<br><em>'+payload.warnings.join(' • ')+'</em>' : '' }
         `;
-        const blob = new Blob([text], {type:'text/plain'}); dl.href = URL.createObjectURL(blob); dl.style.display='inline-block'; dl.textContent='Download transcript';
-        copyBtn.style.display='inline-block'; show(ok,'Done.'); chips.forEach(c=>c.classList.add('done'));
+        const blob = new Blob([text], {type:'text/plain'});
+        dl.href = URL.createObjectURL(blob); dl.style.display='inline-block'; dl.textContent='Download transcript';
+        copyBtn.style.display = 'inline-block';
+        show(ok,'Done.'); chips.forEach(c=>c.classList.add('done'));
+
       } catch(e){ show(err, e.message || 'Request failed.'); }
     }
 
-    async function logout(){ try{ await fetch('/auth/logout', {method:'POST'}); }catch{} location.replace('/'); }
-
+    // Init
     document.getElementById('go').addEventListener('click', run);
-    logoutBtn.addEventListener('click', logout);
+    // Default mode: URL
+    activateUrlMode();
+    // Auth check (shows overlay on GH Pages if needed)
+    checkAuth();
   </script>
 </body>
 </html>
