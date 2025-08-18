@@ -6,29 +6,31 @@
   <title>YouTube Transcription</title>
   <style>
     :root{
+      /* defaults; overridden by server theme */
       --bg:#f7f7fb; --card:#ffffff; --text:#1f2030; --muted:#6a5b6f;
       --accent:#4c7dff; --accent-2:#3dd6a5; --danger:#c0392b;
       --border:rgba(0,0,0,.12);
       --input-bg:#ffffff; --input-text:#1f2030;
       --track:#eef1f6; --bar-from:#4c7dff; --bar-to:#8fb0ff;
+      --drop-bg:#fcfcff; --drop-border:#cfd6ef;
     }
     *{box-sizing:border-box}
     body{margin:0; font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background:var(--bg);}
-    .wrap{max-width:960px;margin:40px auto;padding:0 16px}
+    .wrap{max-width:980px;margin:40px auto;padding:0 16px}
     .card{background:var(--card); border:1px solid var(--border); border-radius:16px; box-shadow:0 10px 30px rgba(0,0,0,.08); overflow:hidden;}
     .head{padding:22px 24px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; gap:12px}
     .title{color:var(--text); font-weight:700; font-size:20px; letter-spacing:.3px; display:flex; align-items:center; gap:10px}
     .badge{padding:4px 10px; border-radius:999px; font-size:12px; border:1px solid var(--border); color:var(--muted)}
     .body{padding:24px}
     label{display:block; color:var(--muted); font-size:13px; margin:10px 0 6px}
-    input[type="text"], select, input[type="number"], input[type="password"]{
+    input[type="text"], select, input[type="number"]{
       width:100%; padding:12px 14px; background:var(--input-bg); color:var(--input-text);
       border:1px solid var(--border); border-radius:10px; outline:none;
     }
     input::placeholder{color:#9aa2b2}
     .grid{display:grid; grid-template-columns:1fr; gap:12px}
-    @media (min-width:720px){ .grid{grid-template-columns: 1.8fr .7fr .7fr} }
-    .row{display:flex; gap:12px; align-items:center}
+    @media (min-width:880px){ .grid{grid-template-columns: 1.6fr .7fr .7fr} }
+    .row{display:flex; gap:12px; align-items:center; flex-wrap:wrap}
     .btn{appearance:none; border:0; padding:12px 14px; border-radius:10px; cursor:pointer; font-weight:600; letter-spacing:.2px; transition:.15s}
     .btn-primary{background:var(--accent); color:white}
     .btn-ghost{background:transparent; color:var(--accent); border:1px solid var(--accent)}
@@ -53,32 +55,29 @@
     .alert.error{background:#ffe9e9; color:#a73a3a; border-color:#f3c2c2}
     .footer{display:flex; gap:10px; margin-top:14px; justify-content:flex-end;}
     a.dl{display:none; text-decoration:none}
+    .toast{position:fixed; top:12px; left:50%; transform:translateX(-50%); background:#fff; border:1px solid var(--border); border-radius:10px; padding:10px 14px; color:var(--text); box-shadow:0 8px 24px rgba(0,0,0,.08); display:none; z-index:1000}
 
-    /* Gate */
-    .gate{position:fixed; inset:0; background:var(--bg); display:flex; align-items:center; justify-content:center; z-index:9999;}
-    .gate .panel{width:min(92vw,440px); background:var(--card); border:1px solid var(--border); border-radius:16px; padding:24px; text-align:center;}
-    .gate h2{color:var(--text); margin:0 0 10px}
-    .gate p{color:var(--muted); margin:0 0 14px}
-    .bigmsg{font-size:28px; font-weight:800; color:var(--text); margin:10px 0 14px; display:none;}
-    .tiny{font-size:12px; color:var(--muted); margin-top:8px}
+    /* Drop zone */
+    .drop{
+      margin-top:16px; padding:16px; border:2px dashed var(--drop-border);
+      background:var(--drop-bg); border-radius:14px; color:#48506a;
+      display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
+    }
+    .drop.highlight{ background:#f8fbff; border-color:var(--accent); }
+    .drop .left{display:flex; align-items:center; gap:12px; flex:1}
+    .drop .title{font-weight:600}
+    .drop .sub{font-size:12px; color:#717a93}
+    .file-pill{display:none; padding:6px 10px; border-radius:999px; background:#f1f4ff; border:1px solid var(--border); color:#2b3e86; font-size:12px}
+
+    /* Hidden file input */
+    #fileInput{display:none}
   </style>
 </head>
 <body>
-  <!-- Gate -->
-  <div class="gate" id="gate">
-    <div class="panel">
-      <h2>Welcome</h2>
-      <p>Enter password to continue</p>
-      <input id="pw" type="password" placeholder="Password"/>
-      <div class="row" style="margin-top:12px; justify-content:center">
-        <button class="btn btn-primary" id="enterBtn">Enter</button>
-      </div>
-      <div class="bigmsg" id="bigMsg"></div>
-      <div class="tiny" id="gateMsg"></div>
-    </div>
-  </div>
+  <!-- One-second greeting -->
+  <div class="toast" id="greet">{{ greeting }}</div>
 
-  <div class="wrap" id="app" style="display:none">
+  <div class="wrap">
     <div class="card">
       <div class="head">
         <div class="title">🎧 YouTube Transcription</div>
@@ -106,9 +105,24 @@
           </div>
         </div>
 
+        <!-- Drag & drop / click-to-upload -->
+        <div class="drop" id="drop">
+          <div class="left">
+            <div>
+              <div class="title">Drag & drop audio/video here</div>
+              <div class="sub">mp3, wav, m4a, mp4, webm, mkv, mov, flac, ogg, opus</div>
+            </div>
+          </div>
+          <div class="row">
+            <button class="btn btn-ghost" id="pickBtn" type="button">Choose file</button>
+            <span class="file-pill" id="filePill"></span>
+          </div>
+          <input type="file" id="fileInput" accept=".mp3,.wav,.m4a,.mp4,.mkv,.webm,.mov,.aac,.flac,.ogg,.opus,video/*,audio/*"/>
+        </div>
+
         <div class="row" style="margin-top:12px">
           <button class="btn btn-primary" id="go">Generate Transcript</button>
-          <button class="btn btn-ghost" id="retrySafe" style="display:none">Retry in Safe Mode</button>
+          <button class="btn btn-ghost" id="logout">Logout</button>
         </div>
 
         <div class="status" id="statusChips">
@@ -136,14 +150,8 @@
   </div>
 
   <script>
-    // API base (GitHub Pages -> ngrok; else same-origin)
-    const API_BASE = location.hostname.endsWith('github.io')
-      ? 'https://fair-joint-dinosaur.ngrok-free.app'
-      : '';
-    const API_URL = API_BASE + '/transcribe';
-    const HEALTH_URL = API_BASE + '/healthz';
-
-    // Themes (soft)
+    // Apply server theme
+    const THEME = "{{ theme }}";
     const THEMES = {
       pink:  { bg:'#fff5fb', card:'#ffffff', text:'#1f2030', muted:'#6a5b6f',
                accent:'#e16bbd', accent2:'#ff9ecf', border:'rgba(0,0,0,.10)',
@@ -152,7 +160,8 @@
                accent:'#4c7dff', accent2:'#3dd6a5', border:'rgba(0,0,0,.12)',
                inputBg:'#ffffff', inputText:'#1f2030', track:'#eef1f6', barFrom:'#4c7dff', barTo:'#8fb0ff' }
     };
-    function applyTheme(t){
+    (function applyTheme(){
+      const t = THEMES[THEME] || THEMES.light;
       const r = document.documentElement.style;
       r.setProperty('--bg', t.bg); r.setProperty('--card', t.card);
       r.setProperty('--text', t.text); r.setProperty('--muted', t.muted);
@@ -161,44 +170,33 @@
       r.setProperty('--input-bg', t.inputBg); r.setProperty('--input-text', t.inputText);
       r.setProperty('--track', t.track); r.setProperty('--bar-from', t.barFrom); r.setProperty('--bar-to', t.barTo);
       document.body.style.background = t.bg;
+    })();
+
+    // One-second greeting once after login
+    const SHOW_GREET = {{ 'true' if show_greet else 'false' }};
+    if (SHOW_GREET) {
+      const g = document.getElementById('greet');
+      g.style.display = 'block';
+      setTimeout(()=>{ g.style.display = 'none'; }, 1000);
     }
 
-    // Gate
-    const gate = document.getElementById('gate');
-    const app  = document.getElementById('app');
-    const pw   = document.getElementById('pw');
-    const enterBtn = document.getElementById('enterBtn');
-    const gateMsg = document.getElementById('gateMsg');
-    const bigMsg  = document.getElementById('bigMsg');
-
-    function unlock(theme, message){
-      applyTheme(theme);
-      bigMsg.textContent = message;
-      bigMsg.style.display = 'block';
-      gateMsg.textContent = '';
-      setTimeout(() => {
-        gate.style.display = 'none';
-        app.style.display = 'block';
-        bigMsg.style.display = 'none';
-      }, 1000);
-    }
-    enterBtn.addEventListener('click', ()=>{
-      const val = (pw.value||'').trim().toLowerCase();
-      if(val === 'droop'){ unlock(THEMES.pink,  'Hey Shmisha 🌸'); }
-      else if(val === 'goofy'){ unlock(THEMES.light, 'Hey Sunflower 🌻'); }
-      else{ gateMsg.textContent = 'Nope.'; }
-    });
-    pw.addEventListener('keydown', (e)=>{ if(e.key==='Enter') enterBtn.click(); });
+    // Endpoints
+    const API_URL_URL   = '/transcribe';
+    const API_URL_FILE  = '/transcribe_file';
+    const HEALTH_URL    = '/healthz';
 
     // UI refs
     const $ = (id)=>document.getElementById(id);
-    const go = $('go'), retrySafe = $('retrySafe');
+    const go = $('go'), logoutBtn = $('logout');
     const urlI = $('youtube-url'), langI = $('language'), chunkI = $('chunk');
     const chips = document.querySelectorAll('.chip');
     const bar = $('bar'), hint = $('hint');
     const note = $('note'), err = $('err'), ok = $('ok');
     const out = $('out'), dl = $('dl'), meta = $('meta'), gpuMeta = $('gpuMeta');
     const copyBtn = $('copyBtn');
+
+    const drop = $('drop'), fileInput = $('fileInput'), pickBtn = $('pickBtn'), filePill = $('filePill');
+    let pickedFile = null;
 
     function setChip(step, state){
       chips.forEach(c=>{
@@ -223,7 +221,28 @@
     }
     health();
 
-    // Copy helper
+    // Drop-zone interactions
+    ;['dragenter','dragover'].forEach(evt=>{
+      drop.addEventListener(evt, e=>{ e.preventDefault(); e.stopPropagation(); drop.classList.add('highlight'); });
+    });
+    ;['dragleave','drop'].forEach(evt=>{
+      drop.addEventListener(evt, e=>{ e.preventDefault(); e.stopPropagation(); drop.classList.remove('highlight'); });
+    });
+    drop.addEventListener('drop', e=>{
+      const files = e.dataTransfer.files;
+      if (!files || !files.length) return;
+      pickedFile = files[0];
+      filePill.textContent = `${pickedFile.name} (${Math.round(pickedFile.size/1024/1024*10)/10} MB)`;
+      filePill.style.display = 'inline-block';
+    });
+    pickBtn.addEventListener('click', ()=> fileInput.click());
+    fileInput.addEventListener('change', ()=>{
+      if (!fileInput.files || !fileInput.files.length) return;
+      pickedFile = fileInput.files[0];
+      filePill.textContent = `${pickedFile.name} (${Math.round(pickedFile.size/1024/1024*10)/10} MB)`;
+      filePill.style.display = 'inline-block';
+    });
+
     async function copyTranscript(){
       try{
         const text = out.textContent || '';
@@ -243,46 +262,52 @@
     }
     copyBtn.addEventListener('click', copyTranscript);
 
-    async function run(safe=false, overrideChunk=null){
+    async function run(){
       clearAlerts();
       out.style.display='none'; dl.style.display='none'; copyBtn.style.display='none'; meta.style.display='none';
-
       chips.forEach(c=>c.classList.remove('active','done','error'));
       setStage('queue','Queued…', 5);
 
-      const url = (urlI.value||'').trim();
-      if(!/^https?:\/\//.test(url)){ show(err,'Please enter a valid YouTube URL (http/https).'); return; }
       const lang = langI.value;
-      const chunk = Number(overrideChunk ?? (chunkI.value || 30));
-
-      // Simulated stages (since we killed SSE)
-      setStage('download','Downloading…', 25);
+      const chunk = Number(chunkI.value || 30);
 
       try{
-        const res = await fetch(API_URL, {
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({
-            youtube_url: url,
-            language: lang,
-            chunk_size: chunk,
-            safe_mode: safe
-          })
-        });
+        let payload, okStatus = false;
 
-        const ct = res.headers.get('content-type') || '';
-        const payload = ct.includes('application/json') ? await res.json() : { error_code:'SERVER_ERROR', message: await res.text() };
+        if (pickedFile) {
+          // File path
+          setStage('download','Uploading file…', 30);
+          const fd = new FormData();
+          fd.append('file', pickedFile);
+          fd.append('language', lang);
+          fd.append('chunk_size', String(chunk));
+          // fd.append('safe_mode', '0');
 
-        if(!res.ok){
-          if(payload && payload.error_code==='OOM'){
+          const res = await fetch(API_URL_FILE, { method:'POST', body: fd });
+          okStatus = res.ok;
+          payload = res.headers.get('content-type')?.includes('application/json') ? await res.json() : { message: await res.text() };
+        } else {
+          // URL path
+          const url = (urlI.value||'').trim();
+          if(!/^https?:\/\//.test(url)){ show(err,'Enter a valid YouTube URL (http/https) or choose a file.'); return; }
+          setStage('download','Downloading…', 30);
+
+          const res = await fetch(API_URL_URL, {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ youtube_url: url, language: lang, chunk_size: chunk })
+          });
+          okStatus = res.ok;
+          payload = res.headers.get('content-type')?.includes('application/json') ? await res.json() : { message: await res.text() };
+        }
+
+        if(!okStatus){
+          if(payload && payload.error_code === 'OOM'){
             setChip('transcribe','error');
             show(err, (payload.suggestion && payload.suggestion.message) || 'GPU OOM.');
-            retrySafe.style.display='inline-block';
-            const nextChunk = (payload.suggestion && payload.suggestion.suggested_chunk_size) || Math.max(10, Math.floor(chunk/2));
-            retrySafe.onclick = ()=> run(true, nextChunk);
             return;
           }
-          if(payload && payload.error_code==='BUSY'){
+          if(payload && payload.error_code === 'BUSY'){
             setStage('queue', `Server busy — retry again in ${payload.retry_after||2}s`, 10);
             show(note, `Server busy. Please retry shortly.`);
             return;
@@ -318,7 +343,13 @@
       }
     }
 
-    document.getElementById('go').addEventListener('click', ()=> run(false));
+    async function logout(){
+      try{ await fetch('/auth/logout', {method:'POST'}); }catch{}
+      location.replace('/');
+    }
+
+    document.getElementById('go').addEventListener('click', run);
+    logoutBtn.addEventListener('click', logout);
   </script>
 </body>
 </html>
