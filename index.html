@@ -71,26 +71,39 @@
     .file-pill a{margin-left:8px; color:#a23; text-decoration:none; font-weight:700}
     #fileInput{display:none}
 
-    /* Login overlay for GH Pages */
-    .overlay{position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,.2); z-index:9999}
+    /* LOGIN (light card, no dark tint) */
+    .overlay{position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:transparent; z-index:9999}
+    .login-wrap{min-height:100svh; width:100%; display:grid; place-items:center; background:var(--bg); padding:16px;}
     .login{width:min(92vw,420px); background:#fff; border:1px solid var(--border); border-radius:16px; box-shadow:0 10px 30px rgba(0,0,0,.08); padding:24px;}
     .login h2{margin:0 0 8px}
-    .login .msg{margin-top:10px; font-size:13px; color:#b52424; display:none}
+    .login p{margin:0 0 14px; color:var(--muted)}
+    .login input{width:100%; padding:12px 14px; background:#fff; color:#1f2030; border:1px solid var(--border); border-radius:10px; outline:none;}
+    .login .row{display:flex; gap:12px; margin-top:12px; justify-content:flex-end}
+    .login .msg{margin-top:10px; font-size:13px; display:none}
+    .msg-ok{color:#1e8e5b}
+    .msg-err{color:#b52424}
+
+    /* Greeting flash */
+    .greet{position:fixed; top:18px; left:50%; transform:translateX(-50%); background:#fff; border:1px solid var(--border); border-radius:14px; padding:14px 18px; font-weight:700; box-shadow:0 8px 24px rgba(0,0,0,.08); display:none; z-index:10000}
   </style>
 </head>
 <body>
   <!-- Client login (for GH Pages) -->
   <div class="overlay" id="loginOverlay">
-    <div class="login">
-      <h2>Sign in</h2>
-      <p>Enter password to continue</p>
-      <input id="pw" type="password" placeholder="Password"/>
-      <div class="row" style="margin-top:12px; justify-content:flex-end">
-        <button class="btn btn-primary" id="enter">Enter</button>
+    <div class="login-wrap">
+      <div class="login">
+        <h2>Welcome</h2>
+        <p>Enter password to continue</p>
+        <input id="pw" type="password" placeholder="Password"/>
+        <div class="row">
+          <button class="btn btn-primary" id="enter">Enter</button>
+        </div>
+        <div class="msg msg-err" id="loginErr">Nope.</div>
+        <div class="msg msg-ok"  id="loginOk">Looks good.</div>
       </div>
-      <div class="msg" id="loginErr"></div>
     </div>
   </div>
+  <div class="greet" id="greet"></div>
 
   <div class="wrap">
     <div class="card">
@@ -189,7 +202,6 @@
 
   <script>
     // === Configure your API base (ngrok) ===
-    // When hosted on GH Pages (cross-site), we must call the ngrok base directly:
     const API_BASE = (location.hostname.endsWith('github.io'))
       ? 'https://fair-joint-dinosaur.ngrok-free.app'   // <-- update when ngrok rotates
       : '';
@@ -221,7 +233,9 @@
 
     // --- UI refs ---
     const $ = id => document.getElementById(id);
-    const loginOverlay = $('loginOverlay'), loginErr = $('loginErr'), enterBtn = $('enter'), pw = $('pw');
+    const loginOverlay = $('loginOverlay'), loginErr = $('loginErr'), loginOk = $('loginOk'), enterBtn = $('enter'), pw = $('pw');
+    const greet = $('greet');
+
     const go = $('go'), logoutBtn = $('logout');
     const modeUrlBtn = $('modeUrl'), modeFileBtn = $('modeFile');
     const urlMode = $('urlMode'), fileMode = $('fileMode');
@@ -242,13 +256,11 @@
     function activateUrlMode(){
       modeUrlBtn.classList.add('active'); modeFileBtn.classList.remove('active');
       urlMode.style.display = ''; fileMode.style.display = 'none';
-      // Clear file state when switching to URL
       pickedFile = null; filePill.textContent=''; filePill.style.display='none'; fileInput.value='';
     }
     function activateFileMode(){
       modeFileBtn.classList.add('active'); modeUrlBtn.classList.remove('active');
       fileMode.style.display = ''; urlMode.style.display = 'none';
-      // Clear URL field when switching to File
       urlI.value = '';
     }
     modeUrlBtn.addEventListener('click', activateUrlMode);
@@ -270,7 +282,6 @@
       pickedFile = files[0];
       filePill.textContent = `${pickedFile.name} (${Math.round(pickedFile.size/1024/1024*10)/10} MB)`;
       filePill.style.display = 'inline-block';
-      // Add clear action
       filePill.innerHTML = `${filePill.textContent} <a href="#" id="clearFile">&times;</a>`;
       document.getElementById('clearFile').onclick = (ev)=>{ ev.preventDefault(); pickedFile=null; filePill.style.display='none'; fileInput.value=''; };
     });
@@ -299,17 +310,18 @@
     async function checkAuth(){
       try{
         const r = await fetch(EP.check, { credentials:'include' });
-        if(!r.ok) throw new Error('check failed');
         const j = await r.json();
         authed = !!j.authed;
         if(authed){
           applyTheme(j.theme || 'light');
-          // brief greet in title badge
-          gpuMeta.textContent = (j.greeting || 'Hello');
-          setTimeout(()=> health(), 800);
+          // flash greeting big for 1s
+          greet.textContent = j.greeting || 'Hello';
+          greet.style.display = 'block';
+          setTimeout(()=>{ greet.style.display='none'; }, 1000);
           loginOverlay.style.display = 'none';
+          setTimeout(()=> health(), 200);
         }else{
-          loginOverlay.style.display = 'flex';
+          loginOverlay.style.display = 'flex'; // light background, no dark tint
         }
       }catch{
         loginOverlay.style.display = 'flex';
@@ -317,9 +329,9 @@
     }
 
     async function login(){
-      loginErr.style.display='none';
+      loginErr.style.display='none'; loginOk.style.display='none';
       const password = (pw.value||'').trim();
-      if(!password){ loginErr.textContent='Please enter a password.'; loginErr.style.display='block'; return; }
+      if(!password){ loginErr.textContent='Nope.'; loginErr.style.display='block'; return; }
       try{
         const r = await fetch(EP.login, {
           method:'POST',
@@ -328,19 +340,26 @@
           body: JSON.stringify({ password })
         });
         if(!r.ok){
-          const j = await r.json().catch(()=>({message:'Invalid password.'}));
-          loginErr.textContent = j.message || 'Invalid password.'; loginErr.style.display = 'block'; return;
+          loginErr.textContent = 'Nope.'; loginErr.style.display = 'block';
+          return;
         }
-        await checkAuth();
+        // success
+        const who = (password === 'droop') ? 'Hey Shmisha 🌸' : (password === 'goofy' ? 'Hey Sunflower 🌻' : 'Looks good.');
+        loginOk.textContent = (who.includes('Hey') ? who : 'Looks good.');
+        loginOk.style.display = 'block';
+        // fetch theme + greet from server and enter after 1s
+        setTimeout(async ()=>{
+          await checkAuth();
+        }, 1000);
       }catch(e){
-        loginErr.textContent = 'Network error.'; loginErr.style.display = 'block';
+        loginErr.textContent = 'Nope.'; loginErr.style.display = 'block';
       }
     }
     enterBtn.addEventListener('click', login);
     pw.addEventListener('keydown', e=>{ if(e.key==='Enter') login(); });
 
     async function logout(){
-      try{ await fetch(EP.logout, { method:'POST', credentials:'include' }); }catch{}
+      try{ await fetch(EP.logout, {method:'POST', credentials:'include'}); }catch{}
       authed = false; loginOverlay.style.display = 'flex';
     }
     logoutBtn.addEventListener('click', logout);
@@ -356,19 +375,26 @@
     }
 
     // --- Run transcription based on active mode ---
+    const chipsEls = document.querySelectorAll('.chip');
+    function setChip(step, state){
+      chipsEls.forEach(c=>{ const s=c.getAttribute('data-step'); c.classList.remove('active','done','error'); if (s===step) c.classList.add(state); });
+    }
+    function setStage(step,label,progress){ setChip(step,'active'); bar.style.width=(progress||0)+'%'; hint.textContent=label; }
+    function clearAlerts(){ note.style.display=err.style.display=ok.style.display='none'; }
+    function show(a,msg){ a.textContent=msg; a.style.display='block'; }
+
     async function run(){
       if(!authed){ loginOverlay.style.display = 'flex'; return; }
 
       clearAlerts();
       out.style.display='none'; dl.style.display='none'; copyBtn.style.display='none'; meta.style.display='none';
-      chips.forEach(c=>c.classList.remove('active','done','error'));
+      chipsEls.forEach(c=>c.classList.remove('active','done','error'));
       setStage('queue','Queued…', 5);
 
       try{
         let payload, okStatus=false, statusCode=0;
 
         if(modeFileBtn.classList.contains('active')){
-          // FILE MODE
           if(!pickedFile){ show(err,'Choose a file first.'); return; }
           const lang = langF.value, chunk = Number(chunkF.value||30);
           setStage('download','Uploading file…', 30);
@@ -378,7 +404,6 @@
           statusCode = res.status; okStatus = res.ok;
           payload = res.headers.get('content-type')?.includes('application/json') ? await res.json() : { message: await res.text() };
         } else {
-          // URL MODE
           const url = (urlI.value||'').trim();
           if(!/^https?:\/\//.test(url)){ show(err,'Enter a valid YouTube URL (http/https).'); return; }
           const lang = langI.value, chunk = Number(chunkI.value||30);
@@ -416,7 +441,7 @@
         const blob = new Blob([text], {type:'text/plain'});
         dl.href = URL.createObjectURL(blob); dl.style.display='inline-block'; dl.textContent='Download transcript';
         copyBtn.style.display = 'inline-block';
-        show(ok,'Done.'); chips.forEach(c=>c.classList.add('done'));
+        show(ok,'Done.'); document.querySelectorAll('.chip').forEach(c=>c.classList.add('done'));
 
       } catch(e){ show(err, e.message || 'Request failed.'); }
     }
@@ -425,7 +450,7 @@
     document.getElementById('go').addEventListener('click', run);
     // Default mode: URL
     activateUrlMode();
-    // Auth check (shows overlay on GH Pages if needed)
+    // Auth check (shows login on GH Pages)
     checkAuth();
   </script>
 </body>
