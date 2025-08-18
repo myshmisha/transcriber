@@ -2,35 +2,49 @@ import os
 import argparse
 import tempfile
 import shutil
+from pathlib import Path
 from typing import Optional
 
 from flask import Flask, request, jsonify, render_template, session
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
+from jinja2 import ChoiceLoader, FileSystemLoader  # <-- add this
 
 from config import load_settings, Settings
 from stt_service import STTService, BusyError, OOMError
 from transcriber import transcribe_url
 
-# Server-side passwords + themes
+# ---------- Passwords & themes ----------
 AUTH_PASSWORDS = {
     "droop": {"theme": "pink",  "greeting": "Hey Shmisha 🌸"},
     "goofy": {"theme": "light", "greeting": "Hey Sunflower 🌻"},
 }
 
-ALLOWED_EXTS = {
-    "mp3", "wav", "m4a", "mp4", "mkv", "webm", "mov", "aac", "flac", "ogg", "opus"
-}
+ALLOWED_EXTS = {"mp3","wav","m4a","mp4","mkv","webm","mov","aac","flac","ogg","opus"}
 
 def allowed_file(filename: str) -> bool:
-    if "." not in filename:
-        return False
-    ext = filename.rsplit(".", 1)[1].lower()
-    return ext in ALLOWED_EXTS
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTS
 
 def create_app(config_path: Optional[str] = None) -> Flask:
     settings: Settings = load_settings(config_path)
-    app = Flask(__name__, static_folder="static", template_folder="templates")
+
+    # Resolve folders relative to this file (works no matter your CWD)
+    BASE_DIR = Path(__file__).resolve().parent
+    TEMPLATE_ROOT = BASE_DIR            # project root (so index.html in root works)
+    TEMPLATE_FALLBACK = BASE_DIR / "templates"  # optional templates folder
+    STATIC_DIR = BASE_DIR / "static"
+
+    app = Flask(
+        __name__,
+        static_folder=str(STATIC_DIR),
+        template_folder=str(TEMPLATE_ROOT),  # primary: root
+    )
+
+    # Also search /templates if present
+    app.jinja_loader = ChoiceLoader([
+        FileSystemLoader(str(TEMPLATE_ROOT)),
+        FileSystemLoader(str(TEMPLATE_FALLBACK)),
+    ])
 
     # Sessions (set SECRET_KEY in prod)
     app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "change-me-please")
@@ -51,6 +65,7 @@ def create_app(config_path: Optional[str] = None) -> Flask:
     @app.get("/")
     def index():
         if not authed():
+            # if this raises, your templates folder is wrong
             return render_template("login.html")
         theme = session.get("theme", "light")
         greeting = session.get("greeting", "Hello")
@@ -75,7 +90,7 @@ def create_app(config_path: Optional[str] = None) -> Flask:
         session.clear()
         return jsonify(ok=True)
 
-    # ---- URL transcription ----
+    # -------- URL transcription --------
     @app.post("/transcribe")
     def transcribe():
         if not authed():
@@ -105,22 +120,14 @@ def create_app(config_path: Optional[str] = None) -> Flask:
             return jsonify(payload), 200
 
         except BusyError as e:
-            return jsonify(
-                error_code="BUSY",
-                message="Transcriber is busy; please retry shortly.",
-                retry_after=e.retry_after,
-            ), 429
+            return jsonify(error_code="BUSY", message="Transcriber is busy; please retry shortly.", retry_after=e.retry_after), 429
         except OOMError as e:
-            return jsonify(
-                error_code="OOM",
-                message="GPU memory was insufficient for this request.",
-                suggestion=e.suggestion,
-            ), 507
+            return jsonify(error_code="OOM", message="GPU memory was insufficient for this request.", suggestion=e.suggestion), 507
         except Exception as e:
             app.logger.exception("Transcription failed")
             return jsonify(error_code="SERVER_ERROR", message=str(e)), 500
 
-    # ---- File transcription (multipart/form-data) ----
+    # -------- File transcription --------
     @app.post("/transcribe_file")
     def transcribe_file():
         if not authed():
@@ -146,6 +153,7 @@ def create_app(config_path: Optional[str] = None) -> Flask:
 
         tmpdir = tempfile.mkdtemp(prefix="stt_upload_")
         try:
+            from werkzeug.utils import secure_filename
             fname = secure_filename(f.filename)
             path = os.path.join(tmpdir, fname)
             f.save(path)

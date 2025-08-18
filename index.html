@@ -18,7 +18,7 @@
     .wrap{max-width:980px;margin:40px auto;padding:0 16px}
     .card{background:var(--card); border:1px solid var(--border); border-radius:16px; box-shadow:0 10px 30px rgba(0,0,0,.08); overflow:hidden;}
     .head{padding:22px 24px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; gap:12px}
-    .title{color:var(--text); font-weight:700; font-size:20px; letter-spacing:.3px; display:flex; align-items:center; gap:10px}
+    .title{color:var(--text); font-weight:700; font-size:20px;}
     .badge{padding:4px 10px; border-radius:999px; font-size:12px; border:1px solid var(--border); color:var(--muted)}
     .body{padding:24px}
     label{display:block; color:var(--muted); font-size:13px; margin:10px 0 6px}
@@ -42,7 +42,6 @@
     .chip.done{color:#1e8e5b; border-color:#bfe9d8; background:#e9fbf5}
     .chip.done .dot{background:var(--accent-2)}
     .chip.error{color:#a73a3a; border-color:#f3c2c2; background:#ffe9e9}
-    .chip.error .dot{background:var(--danger)}
     .progress{height:10px; background:var(--track); border:1px solid var(--border); border-radius:999px; overflow:hidden}
     .bar{height:100%; width:0%; background:linear-gradient(90deg,var(--bar-from),var(--bar-to)); transition:width .2s ease}
     .help{color:var(--muted); font-size:12px; margin-top:8px}
@@ -59,8 +58,6 @@
     .drop{ margin-top:16px; padding:16px; border:2px dashed var(--drop-border); background:var(--drop-bg); border-radius:14px; color:#48506a;
       display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
     .drop.highlight{ background:#f8fbff; border-color:var(--accent); }
-    .drop .left{display:flex; align-items:center; gap:12px; flex:1}
-    .drop .title{font-weight:600}.drop .sub{font-size:12px; color:#717a93}
     .file-pill{display:none; padding:6px 10px; border-radius:999px; background:#f1f4ff; border:1px solid var(--border); color:#2b3e86; font-size:12px}
     #fileInput{display:none}
   </style>
@@ -102,16 +99,8 @@
         </div>
 
         <div class="drop" id="drop">
-          <div class="left">
-            <div>
-              <div class="title">Drag & drop audio/video here</div>
-              <div class="sub">mp3, wav, m4a, mp4, webm, mkv, mov, flac, ogg, opus</div>
-            </div>
-          </div>
-          <div class="row">
-            <button class="btn btn-ghost" id="pickBtn" type="button">Choose file</button>
-            <span class="file-pill" id="filePill"></span>
-          </div>
+          <button class="btn btn-ghost" id="pickBtn" type="button">Choose file</button>
+          <span class="file-pill" id="filePill"></span>
           <input type="file" id="fileInput" accept=".mp3,.wav,.m4a,.mp4,.mkv,.webm,.mov,.aac,.flac,.ogg,.opus,video/*,audio/*"/>
         </div>
 
@@ -134,7 +123,6 @@
         <div class="alert success" id="ok"></div>
 
         <div class="meta" id="meta"></div>
-
         <pre class="out" id="out"></pre>
         <div class="footer">
           <button class="btn btn-ghost" id="copyBtn" style="display:none">Copy</button>
@@ -145,41 +133,29 @@
   </div>
 
   <script>
-    // server-provided values
-    const THEME      = document.body.dataset.theme || 'light';
+    const THEME = document.body.dataset.theme || 'light';
     const SHOW_GREET = document.body.dataset.showGreet === '1';
-    const GREETING   = document.body.dataset.greeting || '';
-
-    // themes
+    const GREETING = document.body.dataset.greeting || '';
     const THEMES = {
       pink:{bg:'#fff5fb',card:'#fff',text:'#1f2030',muted:'#6a5b6f',accent:'#e16bbd',accent2:'#ff9ecf',border:'rgba(0,0,0,.10)',inputBg:'#fff',inputText:'#1f2030',track:'#ffe6f3',barFrom:'#ff7fc7',barTo:'#ffb3dd'},
       light:{bg:'#fff',card:'#fff',text:'#1f2030',muted:'#5c6473',accent:'#4c7dff',accent2:'#3dd6a5',border:'rgba(0,0,0,.12)',inputBg:'#fff',inputText:'#1f2030',track:'#eef1f6',barFrom:'#4c7dff',barTo:'#8fb0ff'}
     };
-    (function applyTheme(){
-      const t = THEMES[THEME] || THEMES.light;
-      const r = document.documentElement.style;
+    (function theme(){
+      const t = THEMES[THEME] || THEMES.light, r = document.documentElement.style;
       r.setProperty('--bg', t.bg); r.setProperty('--card', t.card);
       r.setProperty('--text', t.text); r.setProperty('--muted', t.muted);
       r.setProperty('--accent', t.accent); r.setProperty('--accent-2', t.accent2);
-      r.setProperty('--border', t.border);
-      r.setProperty('--input-bg', t.inputBg); r.setProperty('--input-text', t.inputText);
-      r.setProperty('--track', t.track); r.setProperty('--bar-from', t.barFrom); r.setProperty('--bar-to', t.barTo);
+      r.setProperty('--border', t.border); r.setProperty('--input-bg', t.inputBg);
+      r.setProperty('--input-text', t.inputText); r.setProperty('--track', t.track);
+      r.setProperty('--bar-from', t.barFrom); r.setProperty('--bar-to', t.barTo);
       document.body.style.background = t.bg;
     })();
+    if (SHOW_GREET) { const g=document.getElementById('greet'); g.textContent = GREETING; g.style.display='block'; setTimeout(()=>{ g.style.display='none'; }, 1000); }
 
-    if (SHOW_GREET) {
-      const g = document.getElementById('greet');
-      g.textContent = GREETING;
-      g.style.display = 'block';
-      setTimeout(()=>{ g.style.display = 'none'; }, 1000);
-    }
-
-    // endpoints
     const API_URL_URL  = '/transcribe';
     const API_URL_FILE = '/transcribe_file';
     const HEALTH_URL   = '/healthz';
 
-    // refs
     const $ = id => document.getElementById(id);
     const go = $('go'), logoutBtn = $('logout');
     const urlI = $('youtube-url'), langI = $('language'), chunkI = $('chunk');
@@ -193,110 +169,66 @@
     let pickedFile = null;
 
     function setChip(step, state){
-      chips.forEach(c=>{
-        const s = c.getAttribute('data-step');
-        c.classList.remove('active','done','error');
-        if (s===step) c.classList.add(state);
-      });
+      chips.forEach(c=>{ const s=c.getAttribute('data-step'); c.classList.remove('active','done','error'); if (s===step) c.classList.add(state); });
     }
-    function setStage(step,label,progress){
-      setChip(step,'active'); bar.style.width = (progress||0) + '%'; hint.textContent = label;
-    }
+    function setStage(step,label,progress){ setChip(step,'active'); bar.style.width = (progress||0) + '%'; hint.textContent = label; }
     function clearAlerts(){ note.style.display=err.style.display=ok.style.display='none'; }
-    function show(a, msg){ a.textContent = msg; a.style.display='block'; }
+    function show(a,msg){ a.textContent = msg; a.style.display='block'; }
 
-    async function health(){
-      try{
-        const r = await fetch(HEALTH_URL, {cache:'no-store'});
-        if(!r.ok) return;
-        const j = await r.json();
-        gpuMeta.textContent = `GPU: ${j.device}${j.gpu_index!==null?` #${j.gpu_index}`:''} • ${j.compute_type} • ${j.model_size}`;
-      }catch{}
-    }
+    async function health(){ try{ const r=await fetch(HEALTH_URL,{cache:'no-store'}); if(!r.ok) return; const j=await r.json(); gpuMeta.textContent = `GPU: ${j.device}${j.gpu_index!==null?` #${j.gpu_index}`:''} • ${j.compute_type} • ${j.model_size}`; }catch{} }
     health();
 
-    // drag & drop
-    ['dragenter','dragover'].forEach(evt=>{
-      drop.addEventListener(evt, e=>{ e.preventDefault(); e.stopPropagation(); drop.classList.add('highlight'); });
-    });
-    ['dragleave','drop'].forEach(evt=>{
-      drop.addEventListener(evt, e=>{ e.preventDefault(); e.stopPropagation(); drop.classList.remove('highlight'); });
-    });
+    ['dragenter','dragover'].forEach(evt=> drop.addEventListener(evt, e=>{ e.preventDefault(); e.stopPropagation(); drop.classList.add('highlight'); }));
+    ['dragleave','drop'].forEach(evt=> drop.addEventListener(evt, e=>{ e.preventDefault(); e.stopPropagation(); drop.classList.remove('highlight'); }));
     drop.addEventListener('drop', e=>{
-      const files = e.dataTransfer && e.dataTransfer.files;
-      if (!files || !files.length) return;
-      pickedFile = files[0];
-      filePill.textContent = `${pickedFile.name} (${Math.round(pickedFile.size/1024/1024*10)/10} MB)`;
-      filePill.style.display = 'inline-block';
+      const files = e.dataTransfer && e.dataTransfer.files; if (!files || !files.length) return;
+      pickedFile = files[0]; filePill.textContent = `${pickedFile.name} (${Math.round(pickedFile.size/1024/1024*10)/10} MB)`; filePill.style.display='inline-block';
     });
     pickBtn.addEventListener('click', ()=> fileInput.click());
-    fileInput.addEventListener('change', ()=>{
-      if (!fileInput.files || !fileInput.files.length) return;
-      pickedFile = fileInput.files[0];
-      filePill.textContent = `${pickedFile.name} (${Math.round(pickedFile.size/1024/1024*10)/10} MB)`;
-      filePill.style.display = 'inline-block';
-    });
+    fileInput.addEventListener('change', ()=>{ if (!fileInput.files || !fileInput.files.length) return; pickedFile = fileInput.files[0]; filePill.textContent = `${pickedFile.name} (${Math.round(pickedFile.size/1024/1024*10)/10} MB)`; filePill.style.display='inline-block'; });
 
     async function copyTranscript(){
       try{
-        const text = out.textContent || '';
-        if (!text) return;
+        const text = out.textContent || ''; if (!text) return;
         if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); }
         else { const ta=document.createElement('textarea'); ta.value=text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); }
-        show(ok, 'Copied to clipboard.'); setTimeout(()=> ok.style.display='none', 1500);
-      } catch{ show(err, 'Copy failed.'); }
+        show(ok,'Copied to clipboard.'); setTimeout(()=> ok.style.display='none',1500);
+      } catch { show(err,'Copy failed.'); }
     }
     copyBtn.addEventListener('click', copyTranscript);
 
     async function run(){
-      clearAlerts();
-      out.style.display='none'; dl.style.display='none'; copyBtn.style.display='none'; meta.style.display='none';
-      chips.forEach(c=>c.classList.remove('active','done','error'));
-      setStage('queue','Queued…', 5);
+      clearAlerts(); out.style.display='none'; dl.style.display='none'; copyBtn.style.display='none'; meta.style.display='none';
+      chips.forEach(c=>c.classList.remove('active','done','error')); setStage('queue','Queued…',5);
 
-      const lang = langI.value;
-      const chunk = Number(chunkI.value || 30);
-
+      const lang = langI.value; const chunk = Number(chunkI.value || 30);
       try{
         let payload, okStatus = false, statusCode = 0;
 
         if (pickedFile) {
-          setStage('download','Uploading file…', 30);
-          const fd = new FormData();
-          fd.append('file', pickedFile);
-          fd.append('language', lang);
-          fd.append('chunk_size', String(chunk));
-
+          setStage('download','Uploading file…',30);
+          const fd = new FormData(); fd.append('file', pickedFile); fd.append('language', lang); fd.append('chunk_size', String(chunk));
           const res = await fetch(API_URL_FILE, { method:'POST', body: fd });
           statusCode = res.status; okStatus = res.ok;
           payload = res.headers.get('content-type')?.includes('application/json') ? await res.json() : { message: await res.text() };
         } else {
           const url = (urlI.value||'').trim();
           if(!/^https?:\/\//.test(url)){ show(err,'Enter a valid YouTube URL (http/https) or choose a file.'); return; }
-          setStage('download','Downloading…', 30);
-
-          const res = await fetch(API_URL_URL, {
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({ youtube_url: url, language: lang, chunk_size: chunk })
-          });
+          setStage('download','Downloading…',30);
+          const res = await fetch(API_URL_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ youtube_url:url, language:lang, chunk_size:chunk }) });
           statusCode = res.status; okStatus = res.ok;
           payload = res.headers.get('content-type')?.includes('application/json') ? await res.json() : { message: await res.text() };
         }
 
         if(!okStatus){
-          if(statusCode === 401){ location.replace('/'); return; } // not logged in → go to login
-          if(payload && payload.error_code === 'OOM'){
-            setChip('transcribe','error'); show(err, (payload.suggestion && payload.suggestion.message) || 'GPU OOM.'); return;
-          }
-          if(payload && payload.error_code === 'BUSY'){
-            setStage('queue', `Server busy — retry again in ${payload.retry_after||2}s`, 10); show(note, `Server busy. Please retry shortly.`); return;
-          }
+          if(statusCode === 401){ location.replace('/'); return; }
+          if(payload && payload.error_code === 'OOM'){ setChip('transcribe','error'); show(err, (payload.suggestion && payload.suggestion.message) || 'GPU OOM.'); return; }
+          if(payload && payload.error_code === 'BUSY'){ setStage('queue', `Server busy — retry in ${payload.retry_after||2}s`, 10); show(note, `Server busy. Please retry shortly.`); return; }
           show(err, payload.message || payload.error || 'Server error.'); return;
         }
 
-        setStage('transcribe','Transcribing…', 75);
-        setStage('finalize','Finalizing…', 98);
+        setStage('transcribe','Transcribing…',75);
+        setStage('finalize','Finalizing…',98);
 
         const text = payload.transcript || '';
         out.textContent = text; out.style.display='block';
@@ -308,14 +240,9 @@
           &nbsp;•&nbsp; <strong>Diar:</strong> ${payload.strategy?.diar_device}
           ${payload.warnings && payload.warnings.length ? '<br><em>'+payload.warnings.join(' • ')+'</em>' : '' }
         `;
-        const blob = new Blob([text], {type:'text/plain'});
-        dl.href = URL.createObjectURL(blob); dl.style.display = 'inline-block'; dl.textContent = 'Download transcript';
-        copyBtn.style.display = 'inline-block';
-
-        show(ok,'Done.'); chips.forEach(c=>c.classList.add('done'));
-      } catch(e){
-        show(err, e.message || 'Request failed.');
-      }
+        const blob = new Blob([text], {type:'text/plain'}); dl.href = URL.createObjectURL(blob); dl.style.display='inline-block'; dl.textContent='Download transcript';
+        copyBtn.style.display='inline-block'; show(ok,'Done.'); chips.forEach(c=>c.classList.add('done'));
+      } catch(e){ show(err, e.message || 'Request failed.'); }
     }
 
     async function logout(){ try{ await fetch('/auth/logout', {method:'POST'}); }catch{} location.replace('/'); }
