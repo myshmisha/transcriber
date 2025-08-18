@@ -6,7 +6,6 @@
   <title>YouTube Transcription</title>
   <style>
     :root{
-      /* defaults; overridden by server theme */
       --bg:#f7f7fb; --card:#ffffff; --text:#1f2030; --muted:#6a5b6f;
       --accent:#4c7dff; --accent-2:#3dd6a5; --danger:#c0392b;
       --border:rgba(0,0,0,.12);
@@ -15,7 +14,7 @@
       --drop-bg:#fcfcff; --drop-border:#cfd6ef;
     }
     *{box-sizing:border-box}
-    body{margin:0; font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background:var(--bg);}
+    body{margin:0; font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; background:var(--bg);}
     .wrap{max-width:980px;margin:40px auto;padding:0 16px}
     .card{background:var(--card); border:1px solid var(--border); border-radius:16px; box-shadow:0 10px 30px rgba(0,0,0,.08); overflow:hidden;}
     .head{padding:22px 24px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; gap:12px}
@@ -57,25 +56,22 @@
     a.dl{display:none; text-decoration:none}
     .toast{position:fixed; top:12px; left:50%; transform:translateX(-50%); background:#fff; border:1px solid var(--border); border-radius:10px; padding:10px 14px; color:var(--text); box-shadow:0 8px 24px rgba(0,0,0,.08); display:none; z-index:1000}
 
-    /* Drop zone */
-    .drop{
-      margin-top:16px; padding:16px; border:2px dashed var(--drop-border);
-      background:var(--drop-bg); border-radius:14px; color:#48506a;
-      display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
-    }
+    .drop{ margin-top:16px; padding:16px; border:2px dashed var(--drop-border); background:var(--drop-bg); border-radius:14px; color:#48506a;
+      display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
     .drop.highlight{ background:#f8fbff; border-color:var(--accent); }
     .drop .left{display:flex; align-items:center; gap:12px; flex:1}
-    .drop .title{font-weight:600}
-    .drop .sub{font-size:12px; color:#717a93}
+    .drop .title{font-weight:600}.drop .sub{font-size:12px; color:#717a93}
     .file-pill{display:none; padding:6px 10px; border-radius:999px; background:#f1f4ff; border:1px solid var(--border); color:#2b3e86; font-size:12px}
-
-    /* Hidden file input */
     #fileInput{display:none}
   </style>
 </head>
-<body>
-  <!-- One-second greeting -->
-  <div class="toast" id="greet">{{ greeting }}</div>
+
+<body
+  data-theme="{{ theme }}"
+  data-show-greet="{{ '1' if show_greet else '0' }}"
+  data-greeting="{{ greeting }}"
+>
+  <div class="toast" id="greet"></div>
 
   <div class="wrap">
     <div class="card">
@@ -105,7 +101,6 @@
           </div>
         </div>
 
-        <!-- Drag & drop / click-to-upload -->
         <div class="drop" id="drop">
           <div class="left">
             <div>
@@ -150,15 +145,15 @@
   </div>
 
   <script>
-    // Apply server theme
-    const THEME = "{{ theme }}";
+    // server-provided values
+    const THEME      = document.body.dataset.theme || 'light';
+    const SHOW_GREET = document.body.dataset.showGreet === '1';
+    const GREETING   = document.body.dataset.greeting || '';
+
+    // themes
     const THEMES = {
-      pink:  { bg:'#fff5fb', card:'#ffffff', text:'#1f2030', muted:'#6a5b6f',
-               accent:'#e16bbd', accent2:'#ff9ecf', border:'rgba(0,0,0,.10)',
-               inputBg:'#ffffff', inputText:'#1f2030', track:'#ffe6f3', barFrom:'#ff7fc7', barTo:'#ffb3dd' },
-      light: { bg:'#ffffff', card:'#ffffff', text:'#1f2030', muted:'#5c6473',
-               accent:'#4c7dff', accent2:'#3dd6a5', border:'rgba(0,0,0,.12)',
-               inputBg:'#ffffff', inputText:'#1f2030', track:'#eef1f6', barFrom:'#4c7dff', barTo:'#8fb0ff' }
+      pink:{bg:'#fff5fb',card:'#fff',text:'#1f2030',muted:'#6a5b6f',accent:'#e16bbd',accent2:'#ff9ecf',border:'rgba(0,0,0,.10)',inputBg:'#fff',inputText:'#1f2030',track:'#ffe6f3',barFrom:'#ff7fc7',barTo:'#ffb3dd'},
+      light:{bg:'#fff',card:'#fff',text:'#1f2030',muted:'#5c6473',accent:'#4c7dff',accent2:'#3dd6a5',border:'rgba(0,0,0,.12)',inputBg:'#fff',inputText:'#1f2030',track:'#eef1f6',barFrom:'#4c7dff',barTo:'#8fb0ff'}
     };
     (function applyTheme(){
       const t = THEMES[THEME] || THEMES.light;
@@ -172,21 +167,20 @@
       document.body.style.background = t.bg;
     })();
 
-    // One-second greeting once after login
-    const SHOW_GREET = {{ 'true' if show_greet else 'false' }};
     if (SHOW_GREET) {
       const g = document.getElementById('greet');
+      g.textContent = GREETING;
       g.style.display = 'block';
       setTimeout(()=>{ g.style.display = 'none'; }, 1000);
     }
 
-    // Endpoints
-    const API_URL_URL   = '/transcribe';
-    const API_URL_FILE  = '/transcribe_file';
-    const HEALTH_URL    = '/healthz';
+    // endpoints
+    const API_URL_URL  = '/transcribe';
+    const API_URL_FILE = '/transcribe_file';
+    const HEALTH_URL   = '/healthz';
 
-    // UI refs
-    const $ = (id)=>document.getElementById(id);
+    // refs
+    const $ = id => document.getElementById(id);
     const go = $('go'), logoutBtn = $('logout');
     const urlI = $('youtube-url'), langI = $('language'), chunkI = $('chunk');
     const chips = document.querySelectorAll('.chip');
@@ -221,15 +215,15 @@
     }
     health();
 
-    // Drop-zone interactions
-    ;['dragenter','dragover'].forEach(evt=>{
+    // drag & drop
+    ['dragenter','dragover'].forEach(evt=>{
       drop.addEventListener(evt, e=>{ e.preventDefault(); e.stopPropagation(); drop.classList.add('highlight'); });
     });
-    ;['dragleave','drop'].forEach(evt=>{
+    ['dragleave','drop'].forEach(evt=>{
       drop.addEventListener(evt, e=>{ e.preventDefault(); e.stopPropagation(); drop.classList.remove('highlight'); });
     });
     drop.addEventListener('drop', e=>{
-      const files = e.dataTransfer.files;
+      const files = e.dataTransfer && e.dataTransfer.files;
       if (!files || !files.length) return;
       pickedFile = files[0];
       filePill.textContent = `${pickedFile.name} (${Math.round(pickedFile.size/1024/1024*10)/10} MB)`;
@@ -247,18 +241,10 @@
       try{
         const text = out.textContent || '';
         if (!text) return;
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          await navigator.clipboard.writeText(text);
-        } else {
-          const ta = document.createElement('textarea');
-          ta.value = text; document.body.appendChild(ta);
-          ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
-        }
-        show(ok, 'Copied to clipboard.');
-        setTimeout(()=>{ ok.style.display='none'; }, 1500);
-      } catch(e){
-        show(err, 'Copy failed.');
-      }
+        if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); }
+        else { const ta=document.createElement('textarea'); ta.value=text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); }
+        show(ok, 'Copied to clipboard.'); setTimeout(()=> ok.style.display='none', 1500);
+      } catch{ show(err, 'Copy failed.'); }
     }
     copyBtn.addEventListener('click', copyTranscript);
 
@@ -272,22 +258,19 @@
       const chunk = Number(chunkI.value || 30);
 
       try{
-        let payload, okStatus = false;
+        let payload, okStatus = false, statusCode = 0;
 
         if (pickedFile) {
-          // File path
           setStage('download','Uploading file…', 30);
           const fd = new FormData();
           fd.append('file', pickedFile);
           fd.append('language', lang);
           fd.append('chunk_size', String(chunk));
-          // fd.append('safe_mode', '0');
 
           const res = await fetch(API_URL_FILE, { method:'POST', body: fd });
-          okStatus = res.ok;
+          statusCode = res.status; okStatus = res.ok;
           payload = res.headers.get('content-type')?.includes('application/json') ? await res.json() : { message: await res.text() };
         } else {
-          // URL path
           const url = (urlI.value||'').trim();
           if(!/^https?:\/\//.test(url)){ show(err,'Enter a valid YouTube URL (http/https) or choose a file.'); return; }
           setStage('download','Downloading…', 30);
@@ -297,23 +280,19 @@
             headers:{'Content-Type':'application/json'},
             body: JSON.stringify({ youtube_url: url, language: lang, chunk_size: chunk })
           });
-          okStatus = res.ok;
+          statusCode = res.status; okStatus = res.ok;
           payload = res.headers.get('content-type')?.includes('application/json') ? await res.json() : { message: await res.text() };
         }
 
         if(!okStatus){
+          if(statusCode === 401){ location.replace('/'); return; } // not logged in → go to login
           if(payload && payload.error_code === 'OOM'){
-            setChip('transcribe','error');
-            show(err, (payload.suggestion && payload.suggestion.message) || 'GPU OOM.');
-            return;
+            setChip('transcribe','error'); show(err, (payload.suggestion && payload.suggestion.message) || 'GPU OOM.'); return;
           }
           if(payload && payload.error_code === 'BUSY'){
-            setStage('queue', `Server busy — retry again in ${payload.retry_after||2}s`, 10);
-            show(note, `Server busy. Please retry shortly.`);
-            return;
+            setStage('queue', `Server busy — retry again in ${payload.retry_after||2}s`, 10); show(note, `Server busy. Please retry shortly.`); return;
           }
-          show(err, payload.message || 'Server error.');
-          return;
+          show(err, payload.message || payload.error || 'Server error.'); return;
         }
 
         setStage('transcribe','Transcribing…', 75);
@@ -330,23 +309,16 @@
           ${payload.warnings && payload.warnings.length ? '<br><em>'+payload.warnings.join(' • ')+'</em>' : '' }
         `;
         const blob = new Blob([text], {type:'text/plain'});
-        dl.href = URL.createObjectURL(blob);
-        dl.style.display = 'inline-block';
-        dl.textContent = 'Download transcript';
+        dl.href = URL.createObjectURL(blob); dl.style.display = 'inline-block'; dl.textContent = 'Download transcript';
         copyBtn.style.display = 'inline-block';
 
-        show(ok,'Done.');
-        chips.forEach(c=>c.classList.add('done'));
-
+        show(ok,'Done.'); chips.forEach(c=>c.classList.add('done'));
       } catch(e){
         show(err, e.message || 'Request failed.');
       }
     }
 
-    async function logout(){
-      try{ await fetch('/auth/logout', {method:'POST'}); }catch{}
-      location.replace('/');
-    }
+    async function logout(){ try{ await fetch('/auth/logout', {method:'POST'}); }catch{} location.replace('/'); }
 
     document.getElementById('go').addEventListener('click', run);
     logoutBtn.addEventListener('click', logout);

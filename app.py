@@ -22,24 +22,22 @@ ALLOWED_EXTS = {
     "mp3", "wav", "m4a", "mp4", "mkv", "webm", "mov", "aac", "flac", "ogg", "opus"
 }
 
-
 def allowed_file(filename: str) -> bool:
     if "." not in filename:
         return False
     ext = filename.rsplit(".", 1)[1].lower()
     return ext in ALLOWED_EXTS
 
-
 def create_app(config_path: Optional[str] = None) -> Flask:
     settings: Settings = load_settings(config_path)
     app = Flask(__name__, static_folder="static", template_folder="templates")
 
-    # Session config (change in prod)
+    # Sessions (set SECRET_KEY in prod)
     app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "change-me-please")
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-    app.config["SESSION_COOKIE_SECURE"] = False  # set True if serving strictly over HTTPS
+    app.config["SESSION_COOKIE_SECURE"] = False  # set True if strictly HTTPS
 
-    # Limit uploads (e.g., 2GB). Adjust if you need more/less.
+    # Optional upload limit (default 2GB)
     app.config["MAX_CONTENT_LENGTH"] = int(os.environ.get("MAX_CONTENT_LENGTH_BYTES", 2 * 1024 * 1024 * 1024))
 
     CORS(app, origins="*")
@@ -77,7 +75,7 @@ def create_app(config_path: Optional[str] = None) -> Flask:
         session.clear()
         return jsonify(ok=True)
 
-    # ---- URL transcription (JSON) ----
+    # ---- URL transcription ----
     @app.post("/transcribe")
     def transcribe():
         if not authed():
@@ -112,14 +110,12 @@ def create_app(config_path: Optional[str] = None) -> Flask:
                 message="Transcriber is busy; please retry shortly.",
                 retry_after=e.retry_after,
             ), 429
-
         except OOMError as e:
             return jsonify(
                 error_code="OOM",
                 message="GPU memory was insufficient for this request.",
                 suggestion=e.suggestion,
             ), 507
-
         except Exception as e:
             app.logger.exception("Transcription failed")
             return jsonify(error_code="SERVER_ERROR", message=str(e)), 500
@@ -148,7 +144,6 @@ def create_app(config_path: Optional[str] = None) -> Flask:
         num_speakers = int(num_speakers) if num_speakers else None
         hf_token = request.form.get("hf_token")
 
-        # Save to temp then transcribe
         tmpdir = tempfile.mkdtemp(prefix="stt_upload_")
         try:
             fname = secure_filename(f.filename)
@@ -164,18 +159,11 @@ def create_app(config_path: Optional[str] = None) -> Flask:
                 safe_mode=safe_mode,
             )
             return jsonify({"transcript": text, "strategy": strategy, "warnings": warnings}), 200
+
         except BusyError as e:
-            return jsonify(
-                error_code="BUSY",
-                message="Transcriber is busy; please retry shortly.",
-                retry_after=e.retry_after,
-            ), 429
+            return jsonify(error_code="BUSY", message="Transcriber is busy; please retry shortly.", retry_after=e.retry_after), 429
         except OOMError as e:
-            return jsonify(
-                error_code="OOM",
-                message="GPU memory was insufficient for this request.",
-                suggestion=e.suggestion,
-            ), 507
+            return jsonify(error_code="OOM", message="GPU memory was insufficient for this request.", suggestion=e.suggestion), 507
         except Exception as e:
             app.logger.exception("File transcription failed")
             return jsonify(error_code="SERVER_ERROR", message=str(e)), 500
@@ -194,7 +182,6 @@ def create_app(config_path: Optional[str] = None) -> Flask:
         }, 200
 
     return app
-
 
 # Gunicorn target
 app = create_app()
