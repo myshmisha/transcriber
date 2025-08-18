@@ -65,11 +65,12 @@ def create_app(config_path: Optional[str] = None) -> Flask:
     @app.get("/")
     def index():
         if not authed():
-            # if this raises, your templates folder is wrong
+            # Will find login.html in root or /templates thanks to ChoiceLoader
             return render_template("login.html")
         theme = session.get("theme", "light")
         greeting = session.get("greeting", "Hello")
         show_greet = bool(session.pop("show_greet", False))  # once after login
+        # Will find index.html in root (or /templates)
         return render_template("index.html", theme=theme, greeting=greeting, show_greet=show_greet)
 
     @app.post("/auth/login")
@@ -153,7 +154,6 @@ def create_app(config_path: Optional[str] = None) -> Flask:
 
         tmpdir = tempfile.mkdtemp(prefix="stt_upload_")
         try:
-            from werkzeug.utils import secure_filename
             fname = secure_filename(f.filename)
             path = os.path.join(tmpdir, fname)
             f.save(path)
