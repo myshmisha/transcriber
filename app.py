@@ -46,23 +46,18 @@ def create_app(config_path: Optional[str] = None) -> Flask:
 
     # ---- Sessions / cookies (cross-site friendly for GH Pages) ----
     app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "change-me-please")
-    # For GH Pages (different origin), cookies must be cross-site:
     app.config["SESSION_COOKIE_SAMESITE"] = "None"
-    app.config["SESSION_COOKIE_SECURE"] = True  # ngrok is HTTPS; keep True in prod
+    app.config["SESSION_COOKIE_SECURE"] = True  # ngrok HTTPS
 
     # Optional upload limit (default 2GB)
     app.config["MAX_CONTENT_LENGTH"] = int(os.environ.get("MAX_CONTENT_LENGTH_BYTES", 2 * 1024 * 1024 * 1024))
 
     # ---- CORS (allow GH Pages origin, include credentials) ----
     gh_pages_origin = os.environ.get("GH_PAGES_ORIGIN", "https://myshmisha.github.io")
-    extra_dev = [
-        "http://localhost:3000",
-        "http://127.0.0.1:5500",
-        "http://localhost:5500",
-    ]
+    extra_dev = ["http://localhost:3000", "http://127.0.0.1:5500", "http://localhost:5500"]
     CORS(
         app,
-        origins=[gh_pages_origin, *extra_dev],
+        origins=[gh_pages_origin, "https://*.ngrok-free.app"],
         supports_credentials=True,
         expose_headers=["Content-Type"],
         allow_headers=["Content-Type"],
@@ -79,7 +74,6 @@ def create_app(config_path: Optional[str] = None) -> Flask:
 
     @app.get("/")
     def index():
-        # If serving the UI from Flask (same-origin), use server-side gating.
         if not authed():
             return render_template("login.html")
         theme = session.get("theme", "light")
@@ -87,7 +81,7 @@ def create_app(config_path: Optional[str] = None) -> Flask:
         show_greet = bool(session.pop("show_greet", False))
         return render_template("index.html", theme=theme, greeting=greeting, show_greet=show_greet)
 
-    # ----- Auth API (used by GH Pages client-side login) -----
+    # ----- Auth API -----
 
     @app.get("/auth/check")
     def auth_check():
@@ -117,6 +111,13 @@ def create_app(config_path: Optional[str] = None) -> Flask:
         session.clear()
         return jsonify(ok=True), 200
 
+    # ----- Models list for dropdown -----
+
+    @app.get("/models")
+    def models():
+        svc: STTService = app.config["_STT_SERVICE"]
+        return jsonify({"models": svc.list_models_meta(), "default": svc.default_key}), 200
+
     # ----- Transcribe by URL -----
 
     @app.post("/transcribe")
@@ -141,6 +142,7 @@ def create_app(config_path: Optional[str] = None) -> Flask:
                 service=app.config["_STT_SERVICE"],
                 settings=app.config["_SETTINGS"],
                 safe_mode=bool(data.get("safe_mode", False)),
+                model_key=(data.get("model") or None),   # <-- pass through
             )
             payload = {"transcript": text, "strategy": strategy, "warnings": warnings}
             if session_dir:
@@ -179,6 +181,7 @@ def create_app(config_path: Optional[str] = None) -> Flask:
         num_speakers = request.form.get("num_speakers")
         num_speakers = int(num_speakers) if num_speakers else None
         hf_token = request.form.get("hf_token")
+        model_key = request.form.get("model") or None
 
         tmpdir = tempfile.mkdtemp(prefix="stt_upload_")
         try:
@@ -193,6 +196,7 @@ def create_app(config_path: Optional[str] = None) -> Flask:
                 num_speakers=num_speakers,
                 hf_token=hf_token,
                 safe_mode=safe_mode,
+                model_key=model_key,    # <-- NEW
             )
             return jsonify({"transcript": text, "strategy": strategy, "warnings": warnings}), 200
 
@@ -208,13 +212,13 @@ def create_app(config_path: Optional[str] = None) -> Flask:
 
     @app.get("/healthz")
     def healthz():
-        svc = app.config["_STT_SERVICE"]
+        svc: STTService = app.config["_STT_SERVICE"]
         return {
             "status": "ok",
             "device": svc.device,
             "gpu_index": svc.gpu_index,
             "compute_type": svc.compute_type,
-            "model_size": app.config["_SETTINGS"].model_size,
+            "model_size": svc.default_key,
         }, 200
 
     return app

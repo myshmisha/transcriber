@@ -28,7 +28,7 @@
     }
     input::placeholder{color:#9aa2b2}
     .grid{display:grid; grid-template-columns:1fr; gap:12px}
-    @media (min-width:880px){ .grid{grid-template-columns: 1.6fr .7fr .7fr} }
+    @media (min-width:980px){ .grid{grid-template-columns: 1.4fr .7fr .6fr .7fr} } /* + model col */
     .row{display:flex; gap:12px; align-items:center; flex-wrap:wrap}
     .btn{appearance:none; border:0; padding:12px 14px; border-radius:10px; cursor:pointer; font-weight:600; letter-spacing:.2px; transition:.15s}
     .btn-primary{background:var(--accent); color:#fff}
@@ -55,23 +55,16 @@
     .footer{display:flex; gap:10px; margin-top:14px; justify-content:flex-end;}
     a.dl{display:none; text-decoration:none}
 
-    /* Segmented toggle */
     .seg{display:inline-flex; border:1px solid var(--border); border-radius:10px; overflow:hidden; background:#fff}
     .seg button{border:0; padding:10px 14px; cursor:pointer; background:transparent; color:#4a5670; font-weight:600}
     .seg button.active{background:var(--accent); color:#fff}
 
-    /* Drop zone */
-    .drop{
-      margin-top:16px; padding:16px; border:2px dashed var(--drop-border);
-      background:var(--drop-bg); border-radius:14px; color:#48506a;
-      display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
-    }
+    .drop{margin-top:16px; padding:16px; border:2px dashed var(--drop-border); background:var(--drop-bg); border-radius:14px; color:#48506a; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;}
     .drop.highlight{ background:#f8fbff; border-color:var(--accent); }
     .file-pill{display:none; padding:6px 10px; border-radius:999px; background:#f1f4ff; border:1px solid var(--border); color:#2b3e86; font-size:12px}
     .file-pill a{margin-left:8px; color:#a23; text-decoration:none; font-weight:700}
     #fileInput{display:none}
 
-    /* LOGIN (light card, no dark tint) */
     .overlay{position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:transparent; z-index:9999}
     .login-wrap{min-height:100svh; width:100%; display:grid; place-items:center; background:var(--bg); padding:16px;}
     .login{width:min(92vw,420px); background:#fff; border:1px solid var(--border); border-radius:16px; box-shadow:0 10px 30px rgba(0,0,0,.08); padding:24px;}
@@ -83,7 +76,6 @@
     .msg-ok{color:#1e8e5b}
     .msg-err{color:#b52424}
 
-    /* Greeting flash */
     .greet{position:fixed; top:18px; left:50%; transform:translateX(-50%); background:#fff; border:1px solid var(--border); border-radius:14px; padding:14px 18px; font-weight:700; box-shadow:0 8px 24px rgba(0,0,0,.08); display:none; z-index:10000}
   </style>
 </head>
@@ -95,9 +87,7 @@
         <h2>Welcome</h2>
         <p>Enter password to continue</p>
         <input id="pw" type="password" placeholder="Password"/>
-        <div class="row">
-          <button class="btn btn-primary" id="enter">Enter</button>
-        </div>
+        <div class="row"><button class="btn btn-primary" id="enter">Enter</button></div>
         <div class="msg msg-err" id="loginErr">Nope.</div>
         <div class="msg msg-ok"  id="loginOk">Looks good.</div>
       </div>
@@ -112,7 +102,6 @@
         <div class="badge" id="gpuMeta">GPU: —</div>
       </div>
       <div class="body">
-        <!-- Mode toggle -->
         <div class="row" style="justify-content:space-between; align-items:center">
           <div class="seg">
             <button id="modeUrl" class="active" type="button">YouTube URL</button>
@@ -142,13 +131,17 @@
               <label for="chunk">Chunk (sec)</label>
               <input id="chunk" type="number" min="5" max="120" value="30">
             </div>
+            <div>
+              <label for="model">Model</label>
+              <select id="model"><option>Loading…</option></select>
+            </div>
           </div>
         </div>
 
         <!-- File mode -->
         <div id="fileMode" style="display:none; margin-top:12px">
-          <div class="row">
-            <div>
+          <div class="row" style="width:100%">
+            <div style="flex:1">
               <label>File</label>
               <div class="drop" id="drop">
                 <button class="btn btn-ghost" id="pickBtn" type="button">Choose file</button>
@@ -168,6 +161,8 @@
               </select>
               <label for="chunkF" style="margin-top:10px">Chunk (sec)</label>
               <input id="chunkF" type="number" min="5" max="120" value="30">
+              <label for="modelF" style="margin-top:10px">Model</label>
+              <select id="modelF"><option>Loading…</option></select>
             </div>
           </div>
         </div>
@@ -212,10 +207,10 @@
       logout:       API_BASE + '/auth/logout',
       transcribe:   API_BASE + '/transcribe',
       transcribeF:  API_BASE + '/transcribe_file',
-      health:       API_BASE + '/healthz'
+      health:       API_BASE + '/healthz',
+      models:       API_BASE + '/models'
     };
 
-    // --- Theme helpers (pink vs light) ---
     const THEMES = {
       pink:{bg:'#fff5fb',card:'#fff',text:'#1f2030',muted:'#6a5b6f',accent:'#e16bbd',accent2:'#ff9ecf',border:'rgba(0,0,0,.10)',inputBg:'#fff',inputText:'#1f2030',track:'#ffe6f3',barFrom:'#ff7fc7',barTo:'#ffb3dd'},
       light:{bg:'#fff',card:'#fff',text:'#1f2030',muted:'#5c6473',accent:'#4c7dff',accent2:'#3dd6a5',border:'rgba(0,0,0,.12)',inputBg:'#fff',inputText:'#1f2030',track:'#eef1f6',barFrom:'#4c7dff',barTo:'#8fb0ff'}
@@ -239,8 +234,8 @@
     const go = $('go'), logoutBtn = $('logout');
     const modeUrlBtn = $('modeUrl'), modeFileBtn = $('modeFile');
     const urlMode = $('urlMode'), fileMode = $('fileMode');
-    const urlI = $('youtube-url'), langI = $('language'), chunkI = $('chunk');
-    const langF = $('languageF'), chunkF = $('chunkF');
+    const urlI = $('youtube-url'), langI = $('language'), chunkI = $('chunk'), modelI = $('model');
+    const langF = $('languageF'), chunkF = $('chunkF'), modelF = $('modelF');
     const drop = $('drop'), fileInput = $('fileInput'), pickBtn = $('pickBtn'), filePill = $('filePill');
     const chips = document.querySelectorAll('.chip');
     const bar = $('bar'), hint = $('hint');
@@ -248,11 +243,9 @@
     const out = $('out'), dl = $('dl'), meta = $('meta'), gpuMeta = $('gpuMeta');
     const copyBtn = $('copyBtn');
 
-    // --- State ---
     let pickedFile = null;
     let authed = false;
 
-    // --- Mode switching ---
     function activateUrlMode(){
       modeUrlBtn.classList.add('active'); modeFileBtn.classList.remove('active');
       urlMode.style.display = ''; fileMode.style.display = 'none';
@@ -266,17 +259,14 @@
     modeUrlBtn.addEventListener('click', activateUrlMode);
     modeFileBtn.addEventListener('click', activateFileMode);
 
-    // --- Chips / progress ---
-    function setChip(step, state){
-      chips.forEach(c=>{ const s=c.getAttribute('data-step'); c.classList.remove('active','done','error'); if (s===step) c.classList.add(state); });
-    }
+    function setChip(step, state){ chips.forEach(c=>{ const s=c.getAttribute('data-step'); c.classList.remove('active','done','error'); if (s===step) c.classList.add(state); }); }
     function setStage(step,label,progress){ setChip(step,'active'); bar.style.width=(progress||0)+'%'; hint.textContent=label; }
     function clearAlerts(){ note.style.display=err.style.display=ok.style.display='none'; }
     function show(a,msg){ a.textContent=msg; a.style.display='block'; }
 
-    // --- Drag/drop + pick ---
-    ;['dragenter','dragover'].forEach(evt=> drop.addEventListener(evt, e=>{ e.preventDefault(); e.stopPropagation(); drop.classList.add('highlight'); }));
-    ;['dragleave','drop'].forEach(evt=> drop.addEventListener(evt, e=>{ e.preventDefault(); e.stopPropagation(); drop.classList.remove('highlight'); }));
+    // Drag/drop
+    ['dragenter','dragover'].forEach(evt=> drop.addEventListener(evt, e=>{ e.preventDefault(); e.stopPropagation(); drop.classList.add('highlight'); }));
+    ['dragleave','drop'].forEach(evt=> drop.addEventListener(evt, e=>{ e.preventDefault(); e.stopPropagation(); drop.classList.remove('highlight'); }));
     drop.addEventListener('drop', e=>{
       const files = e.dataTransfer && e.dataTransfer.files; if(!files || !files.length) return;
       pickedFile = files[0];
@@ -295,7 +285,6 @@
       document.getElementById('clearFile').onclick = (ev)=>{ ev.preventDefault(); pickedFile=null; filePill.style.display='none'; fileInput.value=''; };
     });
 
-    // --- Copy transcript ---
     async function copyTranscript(){
       try{
         const text = out.textContent || ''; if(!text) return;
@@ -306,7 +295,7 @@
     }
     copyBtn.addEventListener('click', copyTranscript);
 
-    // --- Auth helpers (cross-site cookies require credentials: 'include') ---
+    // Auth
     async function checkAuth(){
       try{
         const r = await fetch(EP.check, { credentials:'include' });
@@ -314,14 +303,13 @@
         authed = !!j.authed;
         if(authed){
           applyTheme(j.theme || 'light');
-          // flash greeting big for 1s
           greet.textContent = j.greeting || 'Hello';
           greet.style.display = 'block';
           setTimeout(()=>{ greet.style.display='none'; }, 1000);
           loginOverlay.style.display = 'none';
-          setTimeout(()=> health(), 200);
+          setTimeout(()=> { health(); loadModels(); }, 200);
         }else{
-          loginOverlay.style.display = 'flex'; // light background, no dark tint
+          loginOverlay.style.display = 'flex';
         }
       }catch{
         loginOverlay.style.display = 'flex';
@@ -339,32 +327,16 @@
           credentials:'include',
           body: JSON.stringify({ password })
         });
-        if(!r.ok){
-          loginErr.textContent = 'Nope.'; loginErr.style.display = 'block';
-          return;
-        }
-        // success
-        const who = (password === 'droop') ? 'Hey Shmisha 🌸' : (password === 'goofy' ? 'Hey Sunflower 🌻' : 'Looks good.');
-        loginOk.textContent = (who.includes('Hey') ? who : 'Looks good.');
+        if(!r.ok){ loginErr.textContent='Nope.'; loginErr.style.display='block'; return; }
+        loginOk.textContent = (password === 'droop') ? 'Hey Shmisha 🌸' : (password === 'goofy' ? 'Hey Sunflower 🌻' : 'Looks good.');
         loginOk.style.display = 'block';
-        // fetch theme + greet from server and enter after 1s
-        setTimeout(async ()=>{
-          await checkAuth();
-        }, 1000);
-      }catch(e){
-        loginErr.textContent = 'Nope.'; loginErr.style.display = 'block';
-      }
+        setTimeout(()=> checkAuth(), 1000);
+      }catch{ loginErr.textContent='Nope.'; loginErr.style.display='block'; }
     }
-    enterBtn.addEventListener('click', login);
-    pw.addEventListener('keydown', e=>{ if(e.key==='Enter') login(); });
+    $('enter').addEventListener('click', login);
+    $('pw').addEventListener('keydown', e=>{ if(e.key==='Enter') login(); });
+    $('logout').addEventListener('click', async ()=>{ try{ await fetch(EP.logout, {method:'POST', credentials:'include'}); }catch{} authed=false; loginOverlay.style.display='flex'; });
 
-    async function logout(){
-      try{ await fetch(EP.logout, {method:'POST', credentials:'include'}); }catch{}
-      authed = false; loginOverlay.style.display = 'flex';
-    }
-    logoutBtn.addEventListener('click', logout);
-
-    // --- Health ---
     async function health(){
       try{
         const r = await fetch(EP.health, { credentials:'include', cache:'no-store' });
@@ -374,21 +346,40 @@
       }catch{}
     }
 
-    // --- Run transcription based on active mode ---
-    const chipsEls = document.querySelectorAll('.chip');
-    function setChip(step, state){
-      chipsEls.forEach(c=>{ const s=c.getAttribute('data-step'); c.classList.remove('active','done','error'); if (s===step) c.classList.add(state); });
-    }
-    function setStage(step,label,progress){ setChip(step,'active'); bar.style.width=(progress||0)+'%'; hint.textContent=label; }
-    function clearAlerts(){ note.style.display=err.style.display=ok.style.display='none'; }
-    function show(a,msg){ a.textContent=msg; a.style.display='block'; }
+    // ---- Models dropdown ----
+    async function loadModels(){
+      try{
+        const r = await fetch(EP.models, { credentials:'include', cache:'no-store' });
+        if(!r.ok) return;
+        const j = await r.json();
+        const models = j.models || [];
+        const defKey = j.default || 'large-v3';
 
+        function label(m){
+          const where = m.device === 'cuda' ? 'GPU' : 'CPU';
+          return `${m.key} (${where}${m.gpu_index!=null?` #${m.gpu_index}`:''})`;
+        }
+        function fill(sel){
+          sel.innerHTML = '';
+          models.forEach(m=>{
+            const opt = document.createElement('option');
+            opt.value = m.key;
+            opt.textContent = label(m);
+            if(m.key === defKey) opt.selected = true;
+            sel.appendChild(opt);
+          });
+        }
+        fill(modelI); fill(modelF);
+      }catch{}
+    }
+
+    // Run
     async function run(){
       if(!authed){ loginOverlay.style.display = 'flex'; return; }
 
       clearAlerts();
       out.style.display='none'; dl.style.display='none'; copyBtn.style.display='none'; meta.style.display='none';
-      chipsEls.forEach(c=>c.classList.remove('active','done','error'));
+      document.querySelectorAll('.chip').forEach(c=>c.classList.remove('active','done','error'));
       setStage('queue','Queued…', 5);
 
       try{
@@ -396,23 +387,26 @@
 
         if(modeFileBtn.classList.contains('active')){
           if(!pickedFile){ show(err,'Choose a file first.'); return; }
-          const lang = langF.value, chunk = Number(chunkF.value||30);
+          const lang = langF.value, chunk = Number(chunkF.value||30), model = modelF.value;
           setStage('download','Uploading file…', 30);
           const fd = new FormData();
-          fd.append('file', pickedFile); fd.append('language', lang); fd.append('chunk_size', String(chunk));
+          fd.append('file', pickedFile);
+          fd.append('language', lang);
+          fd.append('chunk_size', String(chunk));
+          fd.append('model', model);
           const res = await fetch(EP.transcribeF, { method:'POST', body: fd, credentials:'include' });
           statusCode = res.status; okStatus = res.ok;
           payload = res.headers.get('content-type')?.includes('application/json') ? await res.json() : { message: await res.text() };
         } else {
           const url = (urlI.value||'').trim();
           if(!/^https?:\/\//.test(url)){ show(err,'Enter a valid YouTube URL (http/https).'); return; }
-          const lang = langI.value, chunk = Number(chunkI.value||30);
+          const lang = langI.value, chunk = Number(chunkI.value||30), model = modelI.value;
           setStage('download','Downloading…', 30);
           const res = await fetch(EP.transcribe, {
             method:'POST',
             headers:{'Content-Type':'application/json'},
             credentials:'include',
-            body: JSON.stringify({ youtube_url:url, language:lang, chunk_size:chunk })
+            body: JSON.stringify({ youtube_url:url, language:lang, chunk_size:chunk, model })
           });
           statusCode = res.status; okStatus = res.ok;
           payload = res.headers.get('content-type')?.includes('application/json') ? await res.json() : { message: await res.text() };
@@ -432,7 +426,8 @@
         out.textContent = text; out.style.display='block';
         meta.style.display='block';
         meta.innerHTML = `
-          <strong>Device:</strong> ${payload.strategy?.device}${payload.strategy?.gpu_index!=null?' #'+payload.strategy?.gpu_index:''}
+          <strong>Model:</strong> ${payload.strategy?.model}
+          &nbsp;•&nbsp; <strong>Device:</strong> ${payload.strategy?.device}${payload.strategy?.gpu_index!=null?' #'+payload.strategy?.gpu_index:''}
           &nbsp;•&nbsp; <strong>Compute:</strong> ${payload.strategy?.compute_type}
           &nbsp;•&nbsp; <strong>Chunk:</strong> ${payload.strategy?.chunk_size}
           &nbsp;•&nbsp; <strong>Diar:</strong> ${payload.strategy?.diar_device}
@@ -446,11 +441,8 @@
       } catch(e){ show(err, e.message || 'Request failed.'); }
     }
 
-    // Init
-    document.getElementById('go').addEventListener('click', run);
-    // Default mode: URL
+    $('go').addEventListener('click', run);
     activateUrlMode();
-    // Auth check (shows login on GH Pages)
     checkAuth();
   </script>
 </body>
