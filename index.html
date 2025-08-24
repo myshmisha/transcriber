@@ -28,7 +28,7 @@
     }
     input::placeholder{color:#9aa2b2}
     .grid{display:grid; grid-template-columns:1fr; gap:12px}
-    @media (min-width:880px){ .grid{grid-template-columns: 1.6fr .7fr .7fr} }
+    @media (min-width:880px){ .grid{grid-template-columns: 1.3fr .7fr .7fr .8fr} } /* add 4th col for Model */
     .row{display:flex; gap:12px; align-items:center; flex-wrap:wrap}
     .btn{appearance:none; border:0; padding:12px 14px; border-radius:10px; cursor:pointer; font-weight:600; letter-spacing:.2px; transition:.15s}
     .btn-primary{background:var(--accent); color:#fff}
@@ -55,23 +55,16 @@
     .footer{display:flex; gap:10px; margin-top:14px; justify-content:flex-end;}
     a.dl{display:none; text-decoration:none}
 
-    /* Segmented toggle */
     .seg{display:inline-flex; border:1px solid var(--border); border-radius:10px; overflow:hidden; background:#fff}
     .seg button{border:0; padding:10px 14px; cursor:pointer; background:transparent; color:#4a5670; font-weight:600}
     .seg button.active{background:var(--accent); color:#fff}
 
-    /* Drop zone */
-    .drop{
-      margin-top:16px; padding:16px; border:2px dashed var(--drop-border);
-      background:var(--drop-bg); border-radius:14px; color:#48506a;
-      display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
-    }
+    .drop{margin-top:16px; padding:16px; border:2px dashed var(--drop-border); background:var(--drop-bg); border-radius:14px; color:#48506a; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;}
     .drop.highlight{ background:#f8fbff; border-color:var(--accent); }
     .file-pill{display:none; padding:6px 10px; border-radius:999px; background:#f1f4ff; border:1px solid var(--border); color:#2b3e86; font-size:12px}
     .file-pill a{margin-left:8px; color:#a23; text-decoration:none; font-weight:700}
     #fileInput{display:none}
 
-    /* LOGIN (light card) */
     .overlay{position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:transparent; z-index:9999}
     .login-wrap{min-height:100svh; width:100%; display:grid; place-items:center; background:var(--bg); padding:16px;}
     .login{width:min(92vw,420px); background:#fff; border:1px solid var(--border); border-radius:16px; box-shadow:0 10px 30px rgba(0,0,0,.08); padding:24px;}
@@ -83,17 +76,14 @@
     .msg-ok{color:#1e8e5b}
     .msg-err{color:#b52424}
 
-    /* Greeting flash */
     .greet{position:fixed; top:18px; left:50%; transform:translateX(-50%); background:#fff; border:1px solid var(--border); border-radius:14px; padding:14px 18px; font-weight:700; box-shadow:0 8px 24px rgba(0,0,0,.08); display:none; z-index:10000}
 
-    /* Timings panel */
     .times{margin-top:12px; display:none; gap:10px; flex-wrap:wrap}
     .time-item{background:#fff; border:1px solid var(--border); border-radius:10px; padding:8px 10px; font-size:12px}
     .time-item strong{margin-right:6px}
   </style>
 </head>
 <body>
-  <!-- Client login (for GH Pages) -->
   <div class="overlay" id="loginOverlay">
     <div class="login-wrap">
       <div class="login">
@@ -147,6 +137,12 @@
               <label for="chunk">Chunk (sec)</label>
               <input id="chunk" type="number" min="5" max="120" value="30">
             </div>
+            <div>
+              <label for="model">Model</label>
+              <select id="model">
+                <option value="large-v3">large-v3</option>
+              </select>
+            </div>
           </div>
         </div>
 
@@ -162,8 +158,12 @@
               </div>
               <div class="help">Formats: mp3, wav, m4a, mp4, webm, mkv, mov, flac, ogg, opus</div>
             </div>
-            <div style="min-width:220px">
-              <label for="languageF">Language</label>
+            <div style="min-width:260px">
+              <label for="modelF">Model</label>
+              <select id="modelF">
+                <option value="large-v3">large-v3</option>
+              </select>
+              <label for="languageF" style="margin-top:10px">Language</label>
               <select id="languageF">
                 <option value="en" selected>English</option>
                 <option value="ar">Arabic</option>
@@ -195,7 +195,6 @@
         <div class="alert error" id="err"></div>
         <div class="alert success" id="ok"></div>
 
-        <!-- Timings -->
         <div class="times" id="times">
           <div class="time-item"><strong id="labelDL">Download:</strong> <span id="t_download">—</span></div>
           <div class="time-item"><strong>Transcribe:</strong> <span id="t_transcribe">—</span></div>
@@ -213,21 +212,20 @@
   </div>
 
   <script>
-    // === Configure your API base (ngrok) ===
     const API_BASE = (location.hostname.endsWith('github.io'))
-      ? 'https://fair-joint-dinosaur.ngrok-free.app'   // <-- update when ngrok rotates
+      ? 'https://fair-joint-dinosaur.ngrok-free.app'
       : '';
 
     const EP = {
       check:        API_BASE + '/auth/check',
       login:        API_BASE + '/auth/login',
       logout:       API_BASE + '/auth/logout',
+      models:       API_BASE + '/models',        // <--- NEW
       transcribe:   API_BASE + '/transcribe',
       transcribeF:  API_BASE + '/transcribe_file',
       health:       API_BASE + '/healthz'
     };
 
-    // --- Theme helpers (pink vs light) ---
     const THEMES = {
       pink:{bg:'#fff5fb',card:'#fff',text:'#1f2030',muted:'#6a5b6f',accent:'#e16bbd',accent2:'#ff9ecf',border:'rgba(0,0,0,.10)',inputBg:'#fff',inputText:'#1f2030',track:'#ffe6f3',barFrom:'#ff7fc7',barTo:'#ffb3dd'},
       light:{bg:'#fff',card:'#fff',text:'#1f2030',muted:'#5c6473',accent:'#4c7dff',accent2:'#3dd6a5',border:'rgba(0,0,0,.12)',inputBg:'#fff',inputText:'#1f2030',track:'#eef1f6',barFrom:'#4c7dff',barTo:'#8fb0ff'}
@@ -243,7 +241,6 @@
       document.body.style.background = t.bg;
     }
 
-    // --- UI refs ---
     const $ = id => document.getElementById(id);
     const loginOverlay = $('loginOverlay'), loginErr = $('loginErr'), loginOk = $('loginOk'), enterBtn = $('enter'), pw = $('pw');
     const greet = $('greet');
@@ -251,8 +248,8 @@
     const go = $('go'), logoutBtn = $('logout');
     const modeUrlBtn = $('modeUrl'), modeFileBtn = $('modeFile');
     const urlMode = $('urlMode'), fileMode = $('fileMode');
-    const urlI = $('youtube-url'), langI = $('language'), chunkI = $('chunk');
-    const langF = $('languageF'), chunkF = $('chunkF');
+    const urlI = $('youtube-url'), langI = $('language'), chunkI = $('chunk'), modelI = $('model');
+    const langF = $('languageF'), chunkF = $('chunkF'), modelF = $('modelF');
     const drop = $('drop'), fileInput = $('fileInput'), pickBtn = $('pickBtn'), filePill = $('filePill');
     const chips = document.querySelectorAll('.chip');
     const bar = $('bar'), hint = $('hint');
@@ -260,39 +257,27 @@
     const out = $('out'), dl = $('dl'), meta = $('meta'), gpuMeta = $('gpuMeta');
     const copyBtn = $('copyBtn');
 
-    // Timers UI
     const timesWrap = $('times'), labelDL = $('labelDL');
     const tDownload = $('t_download'), tTranscribe = $('t_transcribe'), tTotal = $('t_total');
 
-    // --- State ---
     let pickedFile = null;
     let authed = false;
 
-    // --- Mode switching ---
     function activateUrlMode(){
       modeUrlBtn.classList.add('active'); modeFileBtn.classList.remove('active');
       urlMode.style.display = ''; fileMode.style.display = 'none';
       pickedFile = null; filePill.textContent=''; filePill.style.display='none'; fileInput.value='';
-      labelDL.textContent = 'Download:'; // label for timing
+      labelDL.textContent = 'Download:';
     }
     function activateFileMode(){
       modeFileBtn.classList.add('active'); modeUrlBtn.classList.remove('active');
       fileMode.style.display = ''; urlMode.style.display = 'none';
       urlI.value = '';
-      labelDL.textContent = 'Upload:'; // label for timing
+      labelDL.textContent = 'Upload:';
     }
     modeUrlBtn.addEventListener('click', activateUrlMode);
     modeFileBtn.addEventListener('click', activateFileMode);
 
-    // --- Chips / progress ---
-    function setChip(step, state){
-      chips.forEach(c=>{ const s=c.getAttribute('data-step'); c.classList.remove('active','done','error'); if (s===step) c.classList.add(state); });
-    }
-    function setStage(step,label,progress){ setChip(step,'active'); bar.style.width=(progress||0)+'%'; hint.textContent=label; }
-    function clearAlerts(){ note.style.display=err.style.display=ok.style.display='none'; }
-    function show(a,msg){ a.textContent=msg; a.style.display='block'; }
-
-    // --- Drag/drop + pick ---
     ;['dragenter','dragover'].forEach(evt=> drop.addEventListener(evt, e=>{ e.preventDefault(); e.stopPropagation(); drop.classList.add('highlight'); }));
     ;['dragleave','drop'].forEach(evt=> drop.addEventListener(evt, e=>{ e.preventDefault(); e.stopPropagation(); drop.classList.remove('highlight'); }));
     drop.addEventListener('drop', e=>{
@@ -313,7 +298,6 @@
       document.getElementById('clearFile').onclick = (ev)=>{ ev.preventDefault(); pickedFile=null; filePill.style.display='none'; fileInput.value=''; };
     });
 
-    // --- Copy transcript ---
     async function copyTranscript(){
       try{
         const text = out.textContent || ''; if(!text) return;
@@ -324,7 +308,43 @@
     }
     copyBtn.addEventListener('click', copyTranscript);
 
-    // --- Auth helpers ---
+    async function loadModels(){
+      try{
+        const r = await fetch(EP.models, { credentials:'include', cache:'no-store' });
+        if(!r.ok) throw 0;
+        const items = await r.json(); // [{key,loaded,default,...}]
+        const fill = (sel)=>{
+          sel.innerHTML = '';
+          // sort: default first, then loaded, then rest
+          const sorted = [...items].sort((a,b)=>{
+            if (a.default && !b.default) return -1;
+            if (b.default && !a.default) return 1;
+            if (a.loaded && !b.loaded) return -1;
+            if (b.loaded && !a.loaded) return 1;
+            return a.key.localeCompare(b.key);
+          });
+          for (const m of sorted){
+            const opt = document.createElement('option');
+            opt.value = m.key;
+            opt.textContent = m.key + (m.loaded ? ' • loaded' : '');
+            if (m.default) opt.selected = true;
+            sel.appendChild(opt);
+          }
+        };
+        fill(modelI); fill(modelF);
+      }catch(e){
+        // fallback minimal list
+        const fallback = ["large-v3","large-v2","medium","small","base","tiny","medium.en","small.en","base.en","tiny.en"];
+        const fill = (sel)=>{
+          sel.innerHTML = '';
+          fallback.forEach(k=>{
+            const opt = document.createElement('option'); opt.value=k; opt.textContent=k; sel.appendChild(opt);
+          });
+        };
+        fill(modelI); fill(modelF);
+      }
+    }
+
     async function checkAuth(){
       try{
         const r = await fetch(EP.check, { credentials:'include' });
@@ -336,6 +356,7 @@
           greet.style.display = 'block';
           setTimeout(()=>{ greet.style.display='none'; }, 1000);
           loginOverlay.style.display = 'none';
+          await loadModels();           // <--- populate model selectors
           setTimeout(()=> health(), 200);
         }else{
           loginOverlay.style.display = 'flex';
@@ -377,7 +398,6 @@
     }
     logoutBtn.addEventListener('click', logout);
 
-    // --- Health ---
     async function health(){
       try{
         const r = await fetch(EP.health, { credentials:'include', cache:'no-store' });
@@ -387,7 +407,6 @@
       }catch{}
     }
 
-    // --- Formatting ---
     function fmt(s){
       if(s == null) return '—';
       const v = Number(s);
@@ -398,7 +417,6 @@
       return `${m}m ${sec}s`;
     }
 
-    // --- Run transcription based on active mode ---
     const chipsEls = document.querySelectorAll('.chip');
     function setChip(step, state){
       chipsEls.forEach(c=>{ const s=c.getAttribute('data-step'); c.classList.remove('active','done','error'); if (s===step) c.classList.add(state); });
@@ -423,23 +441,26 @@
 
         if(modeFileBtn.classList.contains('active')){
           if(!pickedFile){ show(err,'Choose a file first.'); return; }
-          const lang = langF.value, chunk = Number(chunkF.value||30);
+          const lang = langF.value, chunk = Number(chunkF.value||30), model = modelF.value;
           setStage('download','Uploading file…', 30);
           const fd = new FormData();
-          fd.append('file', pickedFile); fd.append('language', lang); fd.append('chunk_size', String(chunk));
+          fd.append('file', pickedFile);
+          fd.append('language', lang);
+          fd.append('chunk_size', String(chunk));
+          fd.append('model_key', model);                     // <--- include model
           const res = await fetch(EP.transcribeF, { method:'POST', body: fd, credentials:'include' });
           statusCode = res.status; okStatus = res.ok;
           payload = res.headers.get('content-type')?.includes('application/json') ? await res.json() : { message: await res.text() };
         } else {
           const url = (urlI.value||'').trim();
           if(!/^https?:\/\//.test(url)){ show(err,'Enter a valid YouTube URL (http/https).'); return; }
-          const lang = langI.value, chunk = Number(chunkI.value||30);
+          const lang = langI.value, chunk = Number(chunkI.value||30), model = modelI.value;
           setStage('download','Downloading…', 30);
           const res = await fetch(EP.transcribe, {
             method:'POST',
             headers:{'Content-Type':'application/json'},
             credentials:'include',
-            body: JSON.stringify({ youtube_url:url, language:lang, chunk_size:chunk })
+            body: JSON.stringify({ youtube_url:url, language:lang, chunk_size:chunk, model_key:model })  // <--- include model
           });
           statusCode = res.status; okStatus = res.ok;
           payload = res.headers.get('content-type')?.includes('application/json') ? await res.json() : { message: await res.text() };
@@ -459,14 +480,14 @@
         out.textContent = text; out.style.display='block';
         meta.style.display='block';
         meta.innerHTML = `
-          <strong>Device:</strong> ${payload.strategy?.device}${payload.strategy?.gpu_index!=null?' #'+payload.strategy?.gpu_index:''}
+          <strong>Model:</strong> ${payload.strategy?.model}
+          &nbsp;•&nbsp; <strong>Device:</strong> ${payload.strategy?.device}${payload.strategy?.gpu_index!=null?' #'+payload.strategy?.gpu_index:''}
           &nbsp;•&nbsp; <strong>Compute:</strong> ${payload.strategy?.compute_type}
           &nbsp;•&nbsp; <strong>Chunk:</strong> ${payload.strategy?.chunk_size}
           &nbsp;•&nbsp; <strong>Diar:</strong> ${payload.strategy?.diar_device}
           ${payload.warnings && payload.warnings.length ? '<br><em>'+payload.warnings.join(' • ')+'</em>' : '' }
         `;
 
-        // Timings
         const tim = payload.timing || {};
         const dlSec = (typeof tim.download_sec === 'number') ? tim.download_sec :
                       (typeof tim.upload_sec === 'number' ? tim.upload_sec : null);
@@ -475,7 +496,6 @@
         tTotal.textContent      = fmt(tim.total_sec);
         timesWrap.style.display = 'flex';
 
-        // download link + copy
         const blob = new Blob([text], {type:'text/plain'});
         dl.href = URL.createObjectURL(blob); dl.style.display='inline-block'; dl.textContent='Download transcript';
         copyBtn.style.display = 'inline-block';
@@ -485,7 +505,6 @@
       } catch(e){ show(err, e.message || 'Request failed.'); }
     }
 
-    // Init
     document.getElementById('go').addEventListener('click', run);
     activateUrlMode();
     checkAuth();

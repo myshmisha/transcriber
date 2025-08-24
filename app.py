@@ -117,6 +117,15 @@ def create_app(config_path: Optional[str] = None) -> Flask:
         session.clear()
         return jsonify(ok=True), 200
 
+    # ----- Models list (for dropdown) -----
+
+    @app.get("/models")
+    def list_models():
+        if not authed():
+            return jsonify(error="Unauthorized"), 401
+        svc: STTService = app.config["_STT_SERVICE"]
+        return jsonify(svc.list_models_meta()), 200
+
     # ----- Transcribe by URL -----
 
     @app.post("/transcribe")
@@ -141,8 +150,14 @@ def create_app(config_path: Optional[str] = None) -> Flask:
                 service=app.config["_STT_SERVICE"],
                 settings=app.config["_SETTINGS"],
                 safe_mode=bool(data.get("safe_mode", False)),
+                model_key=data.get("model_key") or None,   # <--- pass chosen model
             )
-            payload = {"transcript": text, "strategy": strategy, "warnings": warnings, "timing": timing}
+            payload = {
+                "transcript": text,
+                "strategy": strategy,
+                "warnings": warnings,
+                "timing": timing,
+            }
             if session_dir:
                 payload["session_folder"] = session_dir
             return jsonify(payload), 200
@@ -179,6 +194,7 @@ def create_app(config_path: Optional[str] = None) -> Flask:
         num_speakers = request.form.get("num_speakers")
         num_speakers = int(num_speakers) if num_speakers else None
         hf_token = request.form.get("hf_token")
+        model_key = request.form.get("model_key") or None   # <--- chosen model
 
         t0 = time.time()
         tmpdir = tempfile.mkdtemp(prefix="stt_upload_")
@@ -195,6 +211,7 @@ def create_app(config_path: Optional[str] = None) -> Flask:
                 num_speakers=num_speakers,
                 hf_token=hf_token,
                 safe_mode=safe_mode,
+                model_key=model_key,   # <--- pass chosen model
             )
             t2 = time.time()
 

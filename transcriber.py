@@ -48,6 +48,7 @@ def transcribe_url(
     service: Optional[STTService] = None,
     settings: Optional[Settings] = None,
     safe_mode: bool = False,
+    model_key: Optional[str] = None,             # <--- NEW
 ) -> Tuple[str, Optional[str], Dict[str, Any], List[str], Dict[str, float]]:
     """
     Returns: text, session_dir|None, strategy, warnings, timing
@@ -70,6 +71,7 @@ def transcribe_url(
             num_speakers=num_speakers,
             hf_token=hf_token,
             safe_mode=safe_mode,
+            model_key=model_key,        # <--- pass through
         )
         t2 = time.time()
 
