@@ -1,16 +1,24 @@
-model_size: large
-preload_gpu_models: ["small", "base", "tiny"]   # models to preload on GPU
-preload_gpu_compute_type: "int8_float16"        # or "float16" if you have headroom
-
+model_size: large        # default model
 max_concurrency: 1
 cache_dir: ./hf_cache
 
-# behavior
-allow_cpu_fallback: true         # let Safe Mode fall back to CPU if GPU still OOMs
-acquire_timeout_seconds: 2       # how long to wait for a free slot before BUSY
-safe_chunk_size: 10              # Safe Mode max chunk size
+allow_cpu_fallback: true
+acquire_timeout_seconds: 2
+safe_chunk_size: 10
 
 gpu:
-  policy: best                   # best | fixed | cpu
-  id: null                       # used only if policy: fixed
-  exclude: []                    # never use these IDs
+  policy: fixed
+  id: 0
+  exclude: []
+
+preload_gpu_models:
+  - large-v2
+  - medium
+  - medium.en
+  - small
+  - small.en
+  - base
+  - base.en
+  - tiny
+  - tiny.en
+preload_gpu_compute_type: int8_float16
