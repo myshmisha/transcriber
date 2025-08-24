@@ -2,6 +2,7 @@ import os
 import argparse
 import tempfile
 import shutil
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -47,17 +48,22 @@ def create_app(config_path: Optional[str] = None) -> Flask:
     # ---- Sessions / cookies (cross-site friendly for GH Pages) ----
     app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "change-me-please")
     app.config["SESSION_COOKIE_SAMESITE"] = "None"
-    app.config["SESSION_COOKIE_SECURE"] = True  # ngrok HTTPS
+    app.config["SESSION_COOKIE_SECURE"] = True  # ngrok is HTTPS; keep True in prod
 
     # Optional upload limit (default 2GB)
     app.config["MAX_CONTENT_LENGTH"] = int(os.environ.get("MAX_CONTENT_LENGTH_BYTES", 2 * 1024 * 1024 * 1024))
 
-    # ---- CORS (allow GH Pages origin, include credentials) ----
+    # ---- CORS ----
     gh_pages_origin = os.environ.get("GH_PAGES_ORIGIN", "https://myshmisha.github.io")
-    extra_dev = ["http://localhost:3000", "http://127.0.0.1:5500", "http://localhost:5500"]
+    ngrok_url = os.environ.get("NGROK_ORIGIN", "https://fair-joint-dinosaur.ngrok-free.app")
+    extra_dev = [
+        "http://localhost:3000",
+        "http://127.0.0.1:5500",
+        "http://localhost:5500",
+    ]
     CORS(
         app,
-        origins=[gh_pages_origin, "https://*.ngrok-free.app"],
+        origins=[gh_pages_origin, ngrok_url, *extra_dev],
         supports_credentials=True,
         expose_headers=["Content-Type"],
         allow_headers=["Content-Type"],
@@ -111,13 +117,6 @@ def create_app(config_path: Optional[str] = None) -> Flask:
         session.clear()
         return jsonify(ok=True), 200
 
-    # ----- Models list for dropdown -----
-
-    @app.get("/models")
-    def models():
-        svc: STTService = app.config["_STT_SERVICE"]
-        return jsonify({"models": svc.list_models_meta(), "default": svc.default_key}), 200
-
     # ----- Transcribe by URL -----
 
     @app.post("/transcribe")
@@ -131,7 +130,7 @@ def create_app(config_path: Optional[str] = None) -> Flask:
             return jsonify(error="Missing 'youtube_url'"), 400
 
         try:
-            text, session_dir, strategy, warnings = transcribe_url(
+            text, session_dir, strategy, warnings, timing = transcribe_url(
                 url,
                 lang=data.get("language") or "en",
                 chunk_size=int(data.get("chunk_size", 30)),
@@ -142,9 +141,8 @@ def create_app(config_path: Optional[str] = None) -> Flask:
                 service=app.config["_STT_SERVICE"],
                 settings=app.config["_SETTINGS"],
                 safe_mode=bool(data.get("safe_mode", False)),
-                model_key=(data.get("model") or None),   # <-- pass through
             )
-            payload = {"transcript": text, "strategy": strategy, "warnings": warnings}
+            payload = {"transcript": text, "strategy": strategy, "warnings": warnings, "timing": timing}
             if session_dir:
                 payload["session_folder"] = session_dir
             return jsonify(payload), 200
@@ -181,13 +179,14 @@ def create_app(config_path: Optional[str] = None) -> Flask:
         num_speakers = request.form.get("num_speakers")
         num_speakers = int(num_speakers) if num_speakers else None
         hf_token = request.form.get("hf_token")
-        model_key = request.form.get("model") or None
 
+        t0 = time.time()
         tmpdir = tempfile.mkdtemp(prefix="stt_upload_")
         try:
             fname = secure_filename(f.filename)
             path = os.path.join(tmpdir, fname)
             f.save(path)
+            t1 = time.time()
 
             text, strategy, warnings = app.config["_STT_SERVICE"].transcribe(
                 path,
@@ -196,9 +195,15 @@ def create_app(config_path: Optional[str] = None) -> Flask:
                 num_speakers=num_speakers,
                 hf_token=hf_token,
                 safe_mode=safe_mode,
-                model_key=model_key,    # <-- NEW
             )
-            return jsonify({"transcript": text, "strategy": strategy, "warnings": warnings}), 200
+            t2 = time.time()
+
+            timing = {
+                "upload_sec": round(t1 - t0, 3),
+                "transcribe_sec": round(t2 - t1, 3),
+                "total_sec": round(t2 - t0, 3),
+            }
+            return jsonify({"transcript": text, "strategy": strategy, "warnings": warnings, "timing": timing}), 200
 
         except BusyError as e:
             return jsonify(error_code="BUSY", message="Transcriber is busy; please retry shortly.", retry_after=e.retry_after), 429
@@ -212,13 +217,13 @@ def create_app(config_path: Optional[str] = None) -> Flask:
 
     @app.get("/healthz")
     def healthz():
-        svc: STTService = app.config["_STT_SERVICE"]
+        svc = app.config["_STT_SERVICE"]
         return {
             "status": "ok",
             "device": svc.device,
             "gpu_index": svc.gpu_index,
             "compute_type": svc.compute_type,
-            "model_size": svc.default_key,
+            "model_size": app.config["_SETTINGS"].model_size,
         }, 200
 
     return app

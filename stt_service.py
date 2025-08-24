@@ -1,3 +1,4 @@
+# stt_service.py
 import os
 import GPUtil
 import torch
@@ -39,9 +40,6 @@ def _choose_compute_type(free_mb: int) -> str:
     return "int8"
 
 def _norm_model_name(name: str) -> str:
-    """
-    Normalize a few common aliases.
-    """
     if not name:
         return "large-v3"
     n = name.lower().strip()
@@ -60,8 +58,9 @@ def _norm_model_name(name: str) -> str:
     }
     return alias.get(n, n)
 
-# models we advertise (we will lazily load missing ones on CPU int8)
-CATALOG = ["large-v3", "large-v2", "medium", "small", "base", "tiny", "medium.en", "small.en", "base.en", "tiny.en"]
+# We can advertise these; missing ones get lazy CPU load.
+CATALOG = ["large-v3", "large-v2", "medium", "small", "base", "tiny",
+           "medium.en", "small.en", "base.en", "tiny.en"]
 
 @dataclass
 class ModelSlot:
@@ -80,14 +79,14 @@ class STTService:
     Multi-model resident service.
 
     - Loads the default model (GPU if available) at startup.
-    - Other models are lazily loaded on first use on CPU int8 (to avoid VRAM blow-ups).
-    - You can still fall back to CPU for Safe Mode.
+    - Optional: preload extra models on the SAME GPU (settings.preload_gpu_models).
+    - Others are lazy-loaded on CPU int8 to avoid VRAM spikes.
     """
     def __init__(self, settings):
         self.settings = settings
         os.makedirs(self.settings.cache_dir, exist_ok=True)
 
-        # Determine default device from old GPU policy
+        # --- Select default device/GPU ---
         if not torch.cuda.is_available() or getattr(settings.gpu, "policy", "best") == "cpu":
             default_device = "cpu"
             default_gpu = None
@@ -107,41 +106,66 @@ class STTService:
 
         default_compute = _choose_compute_type(free_mb) if default_device == "cuda" else "int8"
 
+        # Expose for /healthz etc.  (Set BEFORE any preloading uses them.)
+        self.device = default_device
+        self.gpu_index = default_gpu
+        self.compute_type = default_compute
+
+        # Concurrency gate
         self._sem = Semaphore(max(1, int(getattr(settings, "max_concurrency", 1))))
 
         # Models registry
         self._models: Dict[str, ModelSlot] = {}
 
-        # Default model (from settings.model_size)
+        # --- Load default model ---
         self.default_key = _norm_model_name(getattr(settings, "model_size", "large-v3"))
         self._models[self.default_key] = ModelSlot(
             key=self.default_key,
-            device=default_device,
-            gpu_index=default_gpu,
-            compute_type=default_compute,
+            device=self.device,
+            gpu_index=self.gpu_index,
+            compute_type=self.compute_type,
             model=whisperx.load_model(
                 self.default_key,
-                device=default_device,
-                device_index=default_gpu if default_device == "cuda" else None,
-                compute_type=default_compute,
+                device=self.device,
+                device_index=self.gpu_index if self.device == "cuda" else None,
+                compute_type=self.compute_type,
             ),
         )
+
+        # --- Optional: preload additional models on SAME GPU ---
+        preload = [_norm_model_name(m) for m in getattr(self.settings, "preload_gpu_models", [])]
+        preload_ct = getattr(self.settings, "preload_gpu_compute_type", self.compute_type)
+
+        for key in preload:
+            if key == self.default_key:
+                continue
+            try:
+                dev = "cuda" if self.gpu_index is not None else "cpu"
+                ct = preload_ct if dev == "cuda" else "int8"
+                self._models[key] = ModelSlot(
+                    key=key,
+                    device=dev,
+                    gpu_index=self.gpu_index if dev == "cuda" else None,
+                    compute_type=ct,
+                    model=whisperx.load_model(
+                        key,
+                        device=dev,
+                        device_index=self.gpu_index if dev == "cuda" else None,
+                        compute_type=ct,
+                    ),
+                )
+                print(f"[STT] Preloaded {key} on {dev}{':' + str(self.gpu_index) if dev=='cuda' else ''}.")
+            except Exception as e:
+                print(f"[STT] Preload '{key}' on GPU failed: {e}. Will lazy-load on CPU.")
 
         # Cached helpers (per device)
         self._align: Dict[str, Tuple[Any, Any]] = {}   # device_type -> (model_a, meta)
         self._diar: Dict[str, Any] = {}                # "cpu" or "cuda:<idx>" -> pipeline
 
-        # Expose default-like attributes for /healthz backward-compat
-        self.device = default_device
-        self.gpu_index = default_gpu
-        self.compute_type = default_compute
-
     # ---------- model management ----------
 
     def _list_catalog(self) -> List[str]:
-        # Always include default first, then the rest of CATALOG
         out = [self.default_key] + [m for m in CATALOG if m != self.default_key]
-        # remove duplicates while preserving order
         seen, uniq = set(), []
         for m in out:
             m2 = _norm_model_name(m)
@@ -151,9 +175,6 @@ class STTService:
         return uniq
 
     def list_models_meta(self) -> List[Dict[str, Any]]:
-        """
-        For UI: which models are available and which are already resident.
-        """
         items = []
         for key in self._list_catalog():
             slot = self._models.get(key)
@@ -182,7 +203,7 @@ class STTService:
         slot = self._models.get(k)
         if slot:
             return slot
-        # Lazy-load on CPU int8 to avoid VRAM spikes
+        # Lazy CPU load to avoid VRAM spikes
         model = whisperx.load_model(k, device="cpu", compute_type="int8")
         slot = ModelSlot(key=k, device="cpu", gpu_index=None, compute_type="int8", model=model)
         self._models[k] = slot
@@ -198,10 +219,6 @@ class STTService:
     # ---------- per-device helpers ----------
 
     def _ensure_align(self, lang_code: str, device_type: str):
-        """
-        device_type: "cpu" or "cuda"
-        (whisperx align model only needs type, not index)
-        """
         if device_type not in self._align:
             model_a, meta = whisperx.load_align_model(language_code=lang_code, device=device_type)
             self._align[device_type] = (model_a, meta)
@@ -240,17 +257,11 @@ class STTService:
         hf_token: Optional[str] = None,
         safe_mode: bool = False,
         acquire_timeout: Optional[int] = None,
-        model_key: Optional[str] = None,   # <-- NEW: choose model
+        model_key: Optional[str] = None,   # choose model
     ) -> Tuple[str, Dict[str, Any], List[str]]:
-        """
-        Returns (text, strategy, warnings).
-        On normal mode OOM → raises OOMError with suggestion dict.
-        On safe mode will try smaller chunks → CPU fallback if allowed.
-        """
         warnings: List[str] = []
         acquire_timeout = getattr(self.settings, "acquire_timeout_seconds", 2) if acquire_timeout is None else acquire_timeout
 
-        # concurrency gate
         if not self._sem.acquire(timeout=acquire_timeout):
             raise BusyError(retry_after=acquire_timeout)
 
@@ -282,7 +293,6 @@ class STTService:
                         "message": "GPU memory was insufficient. Try Safe Mode (smaller chunks, diarization on CPU).",
                     }
                     raise OOMError(suggestion)
-                # safe mode: backoff
                 if chosen_chunk > 10:
                     return self.transcribe(
                         filename,
@@ -294,7 +304,6 @@ class STTService:
                         acquire_timeout=acquire_timeout,
                         model_key=slot.key,
                     )
-                # CPU fallback if permitted
                 if getattr(self.settings, "allow_cpu_fallback", True):
                     warnings.append("GPU OOM → falling back to CPU.")
                     model_to_use = self._cpu_fallback_for(slot)

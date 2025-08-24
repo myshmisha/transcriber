@@ -1,4 +1,7 @@
 model_size: large
+preload_gpu_models: ["small", "base", "tiny"]   # models to preload on GPU
+preload_gpu_compute_type: "int8_float16"        # or "float16" if you have headroom
+
 max_concurrency: 1
 cache_dir: ./hf_cache
 
