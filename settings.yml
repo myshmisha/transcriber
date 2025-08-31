@@ -1,4 +1,4 @@
-model_size: large        # default model
+model_size: medium          # default dropdown & default resident model (maps to large-v3)
 max_concurrency: 1
 cache_dir: ./hf_cache
 
@@ -7,10 +7,11 @@ acquire_timeout_seconds: 2
 safe_chunk_size: 10
 
 gpu:
-  policy: fixed
-  id: 0
-  exclude: []
+  policy: fixed             # best | fixed | cpu
+  id: null                 # used if policy: fixed
+  exclude: []              # GPU IDs to ignore
 
+# === NEW: preload controls ===
 preload_gpu_models:
   - large-v2
   - medium
@@ -21,4 +22,10 @@ preload_gpu_models:
   - base.en
   - tiny
   - tiny.en
-preload_gpu_compute_type: int8_float16
+
+# Put all preloads on the same GPU as the default (safe), OR spread across multiple GPUs.
+preload_strategy: same   # "same" | "spread"
+# If spread, the service will round-robin across available GPUs (minus gpu.exclude).
+# Optionally set a preferred precision for preloads:
+preload_gpu_compute_type: float16   # will auto-degrade to int8_float16 / int8 if needed
+preload_allow_degrade: true

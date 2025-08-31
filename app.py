@@ -1,356 +1,269 @@
 import os
-import GPUtil
-import torch
-import whisperx
-from threading import Semaphore
-from dataclasses import dataclass
-from typing import Optional, List, Tuple, Dict, Any
+import argparse
+import tempfile
+import shutil
+from pathlib import Path
+from typing import Optional
 
-# ---------------- helpers ----------------
+from flask import Flask, request, jsonify, render_template, session
+from flask_cors import CORS
+from werkzeug.utils import secure_filename
+from jinja2 import ChoiceLoader, FileSystemLoader
 
-class BusyError(Exception):
-    def __init__(self, retry_after: int = 2):
-        self.retry_after = retry_after
-        super().__init__("Service is busy; please retry.")
+from config import load_settings, Settings
+from stt_service import STTService, BusyError, OOMError
 
-class OOMError(Exception):
-    def __init__(self, suggestion: dict):
-        self.suggestion = suggestion
-        super().__init__("GPU out of memory")
+# ---------- Passwords & themes ----------
+AUTH_PASSWORDS = {
+    "droop": {"theme": "pink",  "greeting": "Hey Shmisha 🌸"},
+    "goofy": {"theme": "light", "greeting": "Hey Sunflower 🌻"},
+}
 
-def _gpu_free_mb(gpu_id: int) -> int:
-    for g in GPUtil.getGPUs():
-        if g.id == gpu_id:
-            return int(g.memoryFree)
-    return 0
+ALLOWED_EXTS = {"mp3","wav","m4a","mp4","mkv","webm","mov","aac","flac","ogg","opus"}
 
-def _pick_gpu(exclude: List[int]) -> Optional[int]:
-    gpus = [g for g in GPUtil.getGPUs() if g.id not in set(exclude)]
-    if not gpus:
-        return None
-    g = max(gpus, key=lambda x: x.memoryFree)
-    return g.id
+def allowed_file(filename: str) -> bool:
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTS
 
-def _choose_compute_type(free_mb: int) -> str:
-    if free_mb >= 10000:  # >=10GB
-        return "float16"
-    if free_mb >= 4000:
-        return "int8_float16"
-    return "int8"
+def create_app(config_path: Optional[str] = None) -> Flask:
+    settings: Settings = load_settings(config_path)
 
-def _norm_model_name(name: str) -> str:
-    if not name:
-        return "large-v3"
-    n = name.lower().strip()
-    alias = {
-        "large": "large-v3",
-        "largev3": "large-v3",
-        "large-v2": "large-v2",
-        "medium.en": "medium.en",
-        "medium": "medium",
-        "small.en": "small.en",
-        "small": "small",
-        "base.en": "base.en",
-        "base": "base",
-        "tiny.en": "tiny.en",
-        "tiny": "tiny",
-    }
-    return alias.get(n, n)
+    # Paths (support index.html in root and login.html in templates/)
+    BASE_DIR = Path(__file__).resolve().parent
+    TEMPLATE_ROOT = BASE_DIR
+    TEMPLATE_FALLBACK = BASE_DIR / "templates"
+    STATIC_DIR = BASE_DIR / "static"
 
-CATALOG = [
-    "large-v3", "large-v2",
-    "medium", "medium.en",
-    "small", "small.en",
-    "base", "base.en",
-    "tiny", "tiny.en",
-]
+    app = Flask(
+        __name__,
+        static_folder=str(STATIC_DIR),
+        template_folder=str(TEMPLATE_ROOT),  # root first
+    )
+    app.jinja_loader = ChoiceLoader([
+        FileSystemLoader(str(TEMPLATE_ROOT)),
+        FileSystemLoader(str(TEMPLATE_FALLBACK)),
+    ])
 
-@dataclass
-class ModelSlot:
-    key: str
-    device: str
-    gpu_index: Optional[int]
-    compute_type: str
-    model: Any
-    cpu_fallback: Any = None
+    # ---- Sessions / cookies (for same-origin use)
+    app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "change-me-please")
+    # Cross-site cookies are blocked in modern browsers; keep for same-origin only
+    app.config["SESSION_COOKIE_SAMESITE"] = "None"
+    app.config["SESSION_COOKIE_SECURE"] = True
 
+    # Upload limit (default 2GB)
+    app.config["MAX_CONTENT_LENGTH"] = int(os.environ.get("MAX_CONTENT_LENGTH_BYTES", 2 * 1024 * 1024 * 1024))
 
-# ---------------- service ----------------
+    # ---- CORS ----
+    gh_pages_origin = os.environ.get("GH_PAGES_ORIGIN", "https://myshmisha.github.io")
+    CORS(
+        app,
+        origins=[gh_pages_origin, r"https://.*\.ngrok-free\.app", r"https://.*\.ngrok-free\.dev"],
+        supports_credentials=True,
+        expose_headers=["Content-Type"],
+        allow_headers=["Content-Type", "X-Auth"],
+    )
 
-class STTService:
-    """
-    Multi-model resident service.
+    # App state
+    app.config["_SETTINGS"] = settings
+    app.config["_STT_SERVICE"] = STTService(settings)
 
-    - Loads the default model (GPU if available) at startup.
-    - Other models are lazily loaded on first use on CPU int8 (to avoid VRAM blow-ups).
-    - Safe Mode can fall back to CPU automatically.
-    """
+    # ---------- Auth helpers ----------
+    def _auth_from_header():
+        token = (request.headers.get("X-Auth") or "").strip()
+        return AUTH_PASSWORDS.get(token)
 
-    def __init__(self, settings):
-        self.settings = settings
-        os.makedirs(self.settings.cache_dir, exist_ok=True)
+    def _is_authed():
+        # Session cookie (same-origin) OR header token (GH Pages)
+        if session.get("authed"):
+            return True, {"theme": session.get("theme", "light"), "greeting": session.get("greeting", "Hello")}
+        info = _auth_from_header()
+        if info:
+            return True, info
+        return False, None
 
-        # ---- pick a default device/GPU ----
-        if not torch.cuda.is_available() or getattr(settings.gpu, "policy", "best") == "cpu":
-            default_device = "cpu"
-            default_gpu = None
-            free_mb = 0
-        elif getattr(settings.gpu, "policy", "best") == "fixed":
-            default_gpu = int(getattr(settings.gpu, "id", 0) or 0)
-            default_device = "cuda"
-            free_mb = _gpu_free_mb(default_gpu)
-        else:
-            default_gpu = _pick_gpu(getattr(settings.gpu, "exclude", []))
-            if default_gpu is None:
-                default_device = "cpu"
-                free_mb = 0
-            else:
-                default_device = "cuda"
-                free_mb = _gpu_free_mb(default_gpu)
+    # ---------------- Views ----------------
 
-        default_compute = _choose_compute_type(free_mb) if default_device == "cuda" else "int8"
+    @app.get("/")
+    def index():
+        # Server-rendered only used for same-origin; GH Pages serves its own file.
+        ok, info = _is_authed()
+        if not ok:
+            return render_template("login.html")
+        theme = info["theme"]
+        greeting = info["greeting"]
+        show_greet = bool(session.pop("show_greet", False))
+        return render_template("index.html", theme=theme, greeting=greeting, show_greet=show_greet)
 
-        # expose "default" for /healthz etc. (set BEFORE using in preload)
-        self.device = default_device
-        self.gpu_index = default_gpu
-        self.compute_type = default_compute
+    # ----- Auth API (same-origin cookie flow) -----
 
-        # concurrency
-        self._sem = Semaphore(max(1, int(getattr(settings, "max_concurrency", 1))))
+    @app.get("/auth/check")
+    def auth_check():
+        ok, info = _is_authed()
+        if ok:
+            return jsonify(
+                authed=True,
+                theme=info["theme"],
+                greeting=info["greeting"],
+            ), 200
+        return jsonify(authed=False), 200
 
-        # registry
-        self._models: Dict[str, ModelSlot] = {}
+    @app.post("/auth/login")
+    def auth_login():
+        # Cookie session path (same-origin). For GH Pages, client will use X-Auth header instead.
+        data = request.get_json(force=True) or {}
+        pw = (data.get("password") or "").strip()
+        info = AUTH_PASSWORDS.get(pw)
+        if not info:
+            return jsonify(ok=False, message="Invalid password."), 401
+        session["authed"] = True
+        session["theme"] = info["theme"]
+        session["greeting"] = info["greeting"]
+        session["show_greet"] = True
+        return jsonify(ok=True), 200
 
-        # ---- default model from settings.yml ----
-        self.default_key = _norm_model_name(getattr(settings, "model_size", "large-v3"))
-        self._models[self.default_key] = ModelSlot(
-            key=self.default_key,
-            device=default_device,
-            gpu_index=default_gpu,
-            compute_type=default_compute,
-            model=whisperx.load_model(
-                self.default_key,
-                device=default_device,
-                device_index=default_gpu if default_device == "cuda" else None,
-                compute_type=default_compute,
-            ),
-        )
+    @app.post("/auth/logout")
+    def auth_logout():
+        session.clear()
+        return jsonify(ok=True), 200
 
-        # ---- optional GPU preloads (same GPU as default) ----
-        preload = [_norm_model_name(m) for m in getattr(self.settings, "preload_gpu_models", [])]
-        pre_ct = getattr(self.settings, "preload_gpu_compute_type", default_compute)
+    # ----- Models list for dropdown -----
+    @app.get("/models")
+    def models():
+        ok, _ = _is_authed()
+        if not ok:
+            return jsonify(error="Unauthorized"), 401
+        svc: STTService = app.config["_STT_SERVICE"]
+        return jsonify(svc.list_models_meta()), 200
 
-        for key in preload:
-            if key == self.default_key:
-                continue
-            try:
-                dev = "cuda" if default_gpu is not None else "cpu"
-                self._models[key] = ModelSlot(
-                    key=key,
-                    device=dev,
-                    gpu_index=default_gpu if dev == "cuda" else None,
-                    compute_type=pre_ct if dev == "cuda" else "int8",
-                    model=whisperx.load_model(
-                        key,
-                        device=dev,
-                        device_index=default_gpu if dev == "cuda" else None,
-                        compute_type=pre_ct if dev == "cuda" else "int8",
-                    ),
-                )
-                print(f"[STT] Preloaded {key} on {dev}{':' + str(default_gpu) if dev=='cuda' else ''}.")
-            except Exception as e:
-                print(f"[STT] Preload '{key}' on GPU failed: {e}. Will lazy-load on CPU.")
+    # ----- Transcribe by URL -----
+    @app.post("/transcribe")
+    def transcribe():
+        ok, info = _is_authed()
+        if not ok:
+            return jsonify(error="Unauthorized"), 401
 
-        # cached helpers (per device)
-        self._align: Dict[str, Tuple[Any, Any]] = {}   # "cpu" or "cuda" -> (model_a, meta)
-        self._diar: Dict[str, Any] = {}                # device string -> pipeline
-
-    # ---------- model info for UI ----------
-
-    def list_models_meta(self) -> List[Dict[str, Any]]:
-        items = []
-        seen = set()
-        ordering = [self.default_key] + [m for m in CATALOG if m != self.default_key]
-        for key in ordering:
-            key = _norm_model_name(key)
-            if key in seen:
-                continue
-            seen.add(key)
-            slot = self._models.get(key)
-            if slot:
-                items.append({
-                    "key": key,
-                    "device": slot.device,
-                    "gpu_index": slot.gpu_index,
-                    "compute_type": slot.compute_type,
-                    "loaded": True,
-                    "default": (key == self.default_key),
-                })
-            else:
-                items.append({
-                    "key": key,
-                    "device": "cpu",
-                    "gpu_index": None,
-                    "compute_type": "int8",
-                    "loaded": False,
-                    "default": (key == self.default_key),
-                })
-        return items
-
-    # ---------- helpers ----------
-
-    def _get_or_load(self, key: Optional[str]) -> ModelSlot:
-        k = _norm_model_name(key or self.default_key)
-        slot = self._models.get(k)
-        if slot:
-            return slot
-        # lazy CPU load
-        model = whisperx.load_model(k, device="cpu", compute_type="int8")
-        slot = ModelSlot(key=k, device="cpu", gpu_index=None, compute_type="int8", model=model)
-        self._models[k] = slot
-        return slot
-
-    def _cpu_fallback_for(self, slot: ModelSlot) -> Any:
-        if slot.device == "cpu":
-            return slot.model
-        if slot.cpu_fallback is None:
-            slot.cpu_fallback = whisperx.load_model(slot.key, device="cpu", compute_type="int8")
-        return slot.cpu_fallback
-
-    def _ensure_align(self, lang_code: str, device_type: str):
-        if device_type not in self._align:
-            model_a, meta = whisperx.load_align_model(language_code=lang_code, device=device_type)
-            self._align[device_type] = (model_a, meta)
-        return self._align[device_type]
-
-    def _ensure_diar(self, diar_device: torch.device, hf_token: Optional[str]):
-        key = str(diar_device)
-        if key not in self._diar:
-            self._diar[key] = whisperx.DiarizationPipeline(
-                model_name="pyannote/speaker-diarization",
-                use_auth_token=hf_token,
-                device=diar_device,
-                cache_dir=self.settings.cache_dir,
-            )
-        return self._diar[key]
-
-    def _strategy(self, *, slot: ModelSlot, chunk_size: int, diar_on: str) -> Dict[str, Any]:
-        return {
-            "model": slot.key,
-            "device": slot.device,
-            "gpu_index": slot.gpu_index if slot.device == "cuda" else None,
-            "chunk_size": chunk_size,
-            "compute_type": slot.compute_type,
-            "diar_device": diar_on,
-        }
-
-    # ---------- main API ----------
-
-    def transcribe(
-        self,
-        filename: str,
-        *,
-        lang: Optional[str] = None,
-        chunk_size: int = 30,
-        num_speakers: Optional[int] = None,
-        hf_token: Optional[str] = None,
-        safe_mode: bool = False,
-        acquire_timeout: Optional[int] = None,
-        model_key: Optional[str] = None,
-    ) -> Tuple[str, Dict[str, Any], List[str]]:
-        """
-        Returns (text, strategy, warnings).
-        """
-        warnings: List[str] = []
-        acquire_timeout = getattr(self.settings, "acquire_timeout_seconds", 2) if acquire_timeout is None else acquire_timeout
-
-        if not self._sem.acquire(timeout=acquire_timeout):
-            raise BusyError(retry_after=acquire_timeout)
+        data = request.get_json(force=True) or {}
+        url = data.get("youtube_url")
+        if not url:
+            return jsonify(error="Missing 'youtube_url'"), 400
 
         try:
-            slot = self._get_or_load(model_key)
+            text, session_dir, strategy, warnings = transcribe_url(
+                url,
+                lang=data.get("language") or "en",
+                chunk_size=int(data.get("chunk_size", 30)),
+                keep_files=bool(data.get("keep_files", False)),
+                debug_print=bool(data.get("debug_print", False)),
+                num_speakers=(int(data["num_speakers"]) if data.get("num_speakers") is not None else None),
+                hf_token=data.get("hf_token"),
+                service=app.config["_STT_SERVICE"],
+                settings=app.config["_SETTINGS"],
+                safe_mode=bool(data.get("safe_mode", False)),
+                model_key=data.get("model_key"),  # NEW: choose model
+            )
+            payload = {
+                "transcript": text,
+                "strategy": strategy,
+                "warnings": warnings,
+                "theme": info["theme"],
+                "greeting": info["greeting"],
+            }
+            if session_dir:
+                payload["session_folder"] = session_dir
+            return jsonify(payload), 200
 
-            chosen_chunk = min(chunk_size, getattr(self.settings, "safe_chunk_size", 10)) if safe_mode else chunk_size
-            diar_device = torch.device("cpu" if (safe_mode or slot.device == "cpu") else f"cuda:{slot.gpu_index}")
+        except BusyError as e:
+            return jsonify(error_code="BUSY", message="Transcriber is busy; please retry shortly.", retry_after=e.retry_after), 429
+        except OOMError as e:
+            return jsonify(error_code="OOM", message="GPU memory was insufficient for this request.", suggestion=e.suggestion), 507
+        except Exception as e:
+            app.logger.exception("Transcription failed")
+            return jsonify(error_code="SERVER_ERROR", message=str(e)), 500
 
-            model_to_use = slot.model
-            device_type_for_align = "cuda" if slot.device == "cuda" else "cpu"
+    # ----- Transcribe by File -----
+    @app.post("/transcribe_file")
+    def transcribe_file():
+        ok, info = _is_authed()
+        if not ok:
+            return jsonify(error="Unauthorized"), 401
 
-            try:
-                with torch.inference_mode():
-                    result = model_to_use.transcribe(
-                        filename, language=lang, print_progress=False, chunk_size=chosen_chunk
-                    )
-            except RuntimeError as e:
-                msg = str(e)
-                is_oom = ("CUDA out of memory" in msg) or ("cublas" in msg and "alloc" in msg)
-                if not is_oom:
-                    raise
-                if not safe_mode:
-                    suggestion = {
-                        "safe_mode": True,
-                        "suggested_chunk_size": max(10, chosen_chunk // 2),
-                        "diar_on": "cpu",
-                        "message": "GPU memory was insufficient. Try Safe Mode (smaller chunks, diarization on CPU).",
-                    }
-                    raise OOMError(suggestion)
-                if chosen_chunk > 10:
-                    return self.transcribe(
-                        filename,
-                        lang=lang,
-                        chunk_size=max(10, chosen_chunk // 2),
-                        num_speakers=num_speakers,
-                        hf_token=hf_token,
-                        safe_mode=True,
-                        acquire_timeout=acquire_timeout,
-                        model_key=slot.key,
-                    )
-                if getattr(self.settings, "allow_cpu_fallback", True):
-                    warnings.append("GPU OOM → falling back to CPU.")
-                    model_to_use = self._cpu_fallback_for(slot)
-                    device_type_for_align = "cpu"
-                    with torch.inference_mode():
-                        result = model_to_use.transcribe(
-                            filename, language=lang, print_progress=False, chunk_size=chosen_chunk
-                        )
-                else:
-                    suggestion = {
-                        "safe_mode": True,
-                        "suggested_chunk_size": 10,
-                        "diar_on": "cpu",
-                        "message": "GPU OOM. CPU fallback disabled.",
-                    }
-                    raise OOMError(suggestion)
+        if "file" not in request.files:
+            return jsonify(error="Missing file"), 400
+        f = request.files["file"]
+        if f.filename == "":
+            return jsonify(error="Empty filename"), 400
+        if not allowed_file(f.filename):
+            return jsonify(error=f"Unsupported file type. Allowed: {', '.join(sorted(ALLOWED_EXTS))}"), 400
 
-            if num_speakers:
-                align_model, align_meta = self._ensure_align(result["language"], device_type_for_align)
-                diar = self._ensure_diar(diar_device, hf_token)
-                diar_out = diar(filename, min_speakers=num_speakers, max_speakers=num_speakers)
+        lang = request.form.get("language") or "en"
+        try:
+            chunk_size = int(request.form.get("chunk_size", 30))
+        except ValueError:
+            chunk_size = 30
+        safe_mode = (request.form.get("safe_mode", "0") in ("1", "true", "True", "yes"))
+        num_speakers = request.form.get("num_speakers")
+        num_speakers = int(num_speakers) if num_speakers else None
+        hf_token = request.form.get("hf_token")
+        model_key = request.form.get("model_key")
 
-                aligned = whisperx.align(
-                    result["segments"],
-                    align_model,
-                    align_meta,
-                    filename,
-                    device=("cuda" if device_type_for_align == "cuda" else "cpu"),
-                    return_char_alignments=False,
-                )
-                final = whisperx.assign_word_speakers(diar_out, aligned)
-                lines = [
-                    f"{s.get('speaker','SPK')} ({s.get('start',0):05.2f}s)  {s.get('text','').strip()}"
-                    for s in final["segments"]
-                ]
-                text = "\n".join(lines)
-                diar_on = "cpu" if str(diar_device) == "cpu" else "gpu"
-            else:
-                text = " ".join(seg["text"].strip() for seg in result["segments"])
-                diar_on = "disabled"
+        tmpdir = tempfile.mkdtemp(prefix="stt_upload_")
+        try:
+            fname = secure_filename(f.filename)
+            path = os.path.join(tmpdir, fname)
+            f.save(path)
 
-            strategy = self._strategy(slot=slot, chunk_size=chosen_chunk, diar_on=diar_on)
-            return text, strategy, warnings
+            text, strategy, warnings = app.config["_STT_SERVICE"].transcribe(
+                path,
+                lang=lang,
+                chunk_size=chunk_size,
+                num_speakers=num_speakers,
+                hf_token=hf_token,
+                safe_mode=safe_mode,
+                model_key=model_key,  # NEW
+            )
+            return jsonify({
+                "transcript": text,
+                "strategy": strategy,
+                "warnings": warnings,
+                "theme": info["theme"],
+                "greeting": info["greeting"],
+            }), 200
 
+        except BusyError as e:
+            return jsonify(error_code="BUSY", message="Transcriber is busy; please retry shortly.", retry_after=e.retry_after), 429
+        except OOMError as e:
+            return jsonify(error_code="OOM", message="GPU memory was insufficient for this request.", suggestion=e.suggestion), 507
+        except Exception as e:
+            app.logger.exception("File transcription failed")
+            return jsonify(error_code="SERVER_ERROR", message=str(e)), 500
         finally:
-            try:
-                self._sem.release()
-            except Exception:
-                pass
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    @app.get("/healthz")
+    def healthz():
+        ok, _ = _is_authed()
+        if not ok:
+            return jsonify(error="Unauthorized"), 401
+        svc = app.config["_STT_SERVICE"]
+        return {
+            "status": "ok",
+            "device": svc.device,
+            "gpu_index": svc.gpu_index,
+            "compute_type": svc.compute_type,
+            "model_size": app.config["_SETTINGS"].model_size,
+        }, 200
+
+    return app
+
+# Gunicorn target
+app = create_app()
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", help="Path to settings.yml")
+    parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--debug", action="store_true")
+    args = parser.parse_args()
+
+    app = create_app(args.config)
+    app.run(host=args.host, port=args.port, debug=args.debug)
