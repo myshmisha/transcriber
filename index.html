@@ -428,17 +428,38 @@
 
 
   async function loadModels(){
-    try{
-      const r = await fetch(EP.models, { method:'GET', cache:'no-store' });
-      if(!r.ok) return;
-      const items = await r.json();
-      modelKeySel.innerHTML = '<option value="">Default</option>' + items.map(m=>{
-        const tag = m.loaded ? ` (${m.device}${m.gpu_index!=null?`#${m.gpu_index}`:''})` : ' (lazy)';
-        const def = m.default ? ' *' : '';
-        return `<option value="${m.key}">${m.key}${def}${tag}</option>`;
-      }).join('');
-    }catch(e){ console.error("loadModels failed", e); }
+    try {
+      const r = await fetch(EP.models, { method: 'GET', cache: 'no-store' });
+      console.log("Models fetch status:", r.status);
+
+      const ct = r.headers.get("content-type") || "";
+      const raw = await r.text();
+
+      if (!r.ok) {
+        console.error("Models fetch failed:", raw);
+        return;
+      }
+
+      if (!ct.includes("application/json")) {
+        console.error("Models fetch did not return JSON:", raw.slice(0,200));
+        return;
+      }
+
+      const items = JSON.parse(raw);
+      modelKeySel.innerHTML =
+        '<option value="">Default</option>' +
+        items.map(m => {
+          const tag = m.loaded
+            ? ` (${m.device}${m.gpu_index != null ? `#${m.gpu_index}` : ''})`
+            : ' (lazy)';
+          const def = m.default ? ' *' : '';
+          return `<option value="${m.key}">${m.key}${def}${tag}</option>`;
+        }).join('');
+    } catch (e) {
+      console.error("loadModels failed", e);
+    }
   }
+
 
 
     // --- Timers ---
