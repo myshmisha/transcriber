@@ -129,11 +129,9 @@ def create_app(config_path: Optional[str] = None) -> Flask:
     # ----- Models list for dropdown -----
     @app.get("/models")
     def models():
-        ok, _ = _is_authed()
-        if not ok:
-            return jsonify(error="Unauthorized"), 401
         svc: STTService = app.config["_STT_SERVICE"]
         return jsonify(svc.list_models_meta()), 200
+
 
     # ----- Transcribe by URL -----
     @app.post("/transcribe")
