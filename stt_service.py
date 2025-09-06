@@ -279,11 +279,45 @@ class STTService:
         slot = self._models.get(k)
         if slot:
             return slot
-        # lazy CPU load (we won’t auto-migrate here to avoid surprises mid-request)
+
+        # --- New lazy-load: try same GPU as default ---
+        if self.device == "cuda" and self.gpu_index is not None:
+            ladder = ["float16", "int8_float16", "int8"]
+            for ct in ladder:
+                try:
+                    torch.cuda.empty_cache()
+                    model = whisperx.load_model(
+                        k,
+                        device="cuda",
+                        device_index=self.gpu_index,
+                        compute_type=ct,
+                    )
+                    slot = ModelSlot(
+                        key=k,
+                        device="cuda",
+                        gpu_index=self.gpu_index,
+                        compute_type=ct,
+                        model=model,
+                    )
+                    self._models[k] = slot
+                    print(f"[STT] Lazy-loaded '{k}' on cuda:{self.gpu_index} ({ct}).")
+                    return slot
+                except RuntimeError as e:
+                    if "out of memory" in str(e).lower():
+                        print(f"[STT] OOM lazy-loading '{k}' on cuda:{self.gpu_index} with {ct}; trying next.")
+                        continue
+                    raise
+                except Exception as e:
+                    print(f"[STT] Error lazy-loading '{k}' on cuda:{self.gpu_index} ({ct}): {e}")
+                    break
+
+        # --- Fallback: CPU int8 ---
         model = whisperx.load_model(k, device="cpu", compute_type="int8")
         slot = ModelSlot(key=k, device="cpu", gpu_index=None, compute_type="int8", model=model)
         self._models[k] = slot
+        print(f"[STT] Lazy-loaded '{k}' on CPU (int8).")
         return slot
+
 
     def _cpu_fallback_for(self, slot: ModelSlot) -> Any:
         if slot.device == "cpu":

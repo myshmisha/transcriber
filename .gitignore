@@ -6,3 +6,5 @@ __pycache__/
 sessions/
 hf_cache/
 
+tmp*
+.nfs*

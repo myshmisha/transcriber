@@ -417,20 +417,18 @@
       return h;
     }
 
-    // --- Health ---
     async function health(){
       try{
-        const r = await fetch(EP.health, { headers: authHeaders(), credentials: API_BASE?'omit':'include', cache:'no-store' });
+        const r = await fetch(EP.health, {method:'GET', headers:authHeaders(), credentials:API_BASE?'omit':'include', cache:'no-store'});
         if(!r.ok) return;
         const j = await r.json();
         gpuMeta.textContent = `GPU: ${j.device}${j.gpu_index!==null?` #${j.gpu_index}`:''} • ${j.compute_type} • ${j.model_size}`;
       }catch{}
     }
 
-    // --- Models ---
     async function loadModels(){
       try{
-        const r = await fetch(EP.models, { headers: authHeaders(), credentials: API_BASE?'omit':'include', cache:'no-store' });
+        const r = await fetch(EP.models, {method:'GET', headers:authHeaders(), credentials:API_BASE?'omit':'include', cache:'no-store'});
         if(!r.ok) return;
         const items = await r.json();
         modelKeySel.innerHTML = '<option value="">Default</option>' + items.map(m=>{

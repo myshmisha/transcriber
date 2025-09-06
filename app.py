@@ -12,6 +12,7 @@ from jinja2 import ChoiceLoader, FileSystemLoader
 
 from config import load_settings, Settings
 from stt_service import STTService, BusyError, OOMError
+from transcriber import transcribe_url
 
 # ---------- Passwords & themes ----------
 AUTH_PASSWORDS = {
