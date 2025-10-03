@@ -1,17 +1,26 @@
-name: whisper-env
+name: yt-transcribe
 channels:
-  - pytorch
   - conda-forge
-dependencies:
-  - python=3.9
-  - ffmpeg
-  - openh264 
   - pytorch
-  - torchvision
-  - torchaudio
-  - GPUtil
+  - defaults
+dependencies:
+  # Core Python
+  - python=3.9
   - pip
+
+  # Torch stack
+  - pytorch
+  - pytorch-cuda=12.4
+  - torchaudio
+  - ffmpeg
+
+  # Web server
+  - flask
+  - gunicorn
+
+  # Playwright + yt-dlp
   - pip:
-    - openai-whisper
-    - whisperx
-    - yt-dlp
+      - yt-dlp
+      - playwright
+      - requests
+      - urllib3
