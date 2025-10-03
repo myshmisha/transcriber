@@ -1,0 +1,17 @@
+name: whisper-env
+channels:
+  - pytorch
+  - conda-forge
+dependencies:
+  - python=3.9
+  - ffmpeg
+  - openh264 
+  - pytorch
+  - torchvision
+  - torchaudio
+  - GPUtil
+  - pip
+  - pip:
+    - openai-whisper
+    - whisperx
+    - yt-dlp
